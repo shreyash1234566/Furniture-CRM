@@ -15,7 +15,6 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-  Armchair,
   Sparkles,
   Headphones,
   UserPlus,
@@ -24,33 +23,64 @@ import {
   Ruler,
   KeyRound,
   X,
+  Trash2,
+  MailPlus,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSession } from 'next-auth/react';
 import { useSidebarContext } from './SidebarContext';
+import { getStoreSettings } from '@/app/actions/settings';
 
+// role: which roles can see this item. undefined = all authenticated users
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/walkins', label: 'Walk-ins', icon: UserPlus },
   { href: '/leads', label: 'Leads', icon: Users },
-  { href: '/staff', label: 'Staff', icon: UsersRound },
+  { href: '/staff', label: 'Staff', icon: UsersRound, roles: ['ADMIN', 'MANAGER'] },
   { href: '/staff-portal', label: 'Staff Portal', icon: KeyRound },
   { href: '/appointments', label: 'Appointments', icon: Calendar },
   { href: '/inventory', label: 'Inventory', icon: Package },
   { href: '/orders', label: 'Orders', icon: ShoppingCart },
-  { href: '/billing', label: 'Billing & POS', icon: Receipt },
+  { href: '/billing', label: 'Billing & POS', icon: Receipt, roles: ['ADMIN', 'MANAGER'] },
   { href: '/custom-orders', label: 'Custom Orders', icon: Ruler },
-  { href: '/marketing', label: 'Marketing', icon: Megaphone },
+  { href: '/drafts', label: 'Drafts', icon: Trash2, roles: ['ADMIN', 'MANAGER'] },
+  { href: '/email-marketing', label: 'Email Marketing', icon: MailPlus, roles: ['ADMIN', 'MANAGER'] },
+  { href: '/marketing', label: 'Marketing', icon: Megaphone, roles: ['ADMIN', 'MANAGER'] },
   { href: '/conversations', label: 'Conversations', icon: MessageSquare },
   { href: '/calls', label: 'Call Center', icon: Headphones },
   { href: '/reviews', label: 'Reviews', icon: Star },
   { href: '/recommend', label: 'AI Recommend', icon: Sparkles },
-  { href: '/settings', label: 'Settings', icon: Settings },
+  { href: '/settings', label: 'Settings', icon: Settings, roles: ['ADMIN'] },
 ];
 
 export default function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const { sidebarOpen, setSidebarOpen } = useSidebarContext();
+  const { data: session } = useSession();
+
+  const [logoUrl, setLogoUrl] = useState('/logo.png');
+
+  useEffect(() => {
+    getStoreSettings().then(res => {
+      if (res.success && res.data.logo) setLogoUrl(res.data.logo);
+    });
+    const handleLogoUpdate = (e) => setLogoUrl(e.detail);
+    window.addEventListener('logo-updated', handleLogoUpdate);
+    return () => window.removeEventListener('logo-updated', handleLogoUpdate);
+  }, []);
+
+  const userRole = session?.user?.role || 'STAFF';
+  const userName = session?.user?.name || 'User';
+  const userInitials = userName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+
+  const roleLabel = userRole === 'ADMIN' ? 'Administrator' : userRole === 'MANAGER' ? 'Manager' : 'Staff';
+
+  // Filter nav items by role
+  const visibleNav = navItems.filter(item => {
+    if (!item.roles) return true;
+    return item.roles.includes(userRole);
+  });
 
   return (
     <>
@@ -76,12 +106,12 @@ export default function Sidebar() {
         <div className="flex items-center justify-between px-5 h-[64px] border-b border-white/10 flex-shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
-              <Image src="/logo.png" alt="Furniture CRM Logo" width={32} height={32} className="object-contain" priority />
+              <Image src={logoUrl} alt="Furniture CRM Logo" width={32} height={32} className="object-contain" priority />
             </div>
             {(!collapsed || sidebarOpen) && (
               <div>
                 <h1 className="text-sm font-semibold text-white tracking-wide">FurnitureCRM</h1>
-                <p className="text-[10px] text-white/40 tracking-widest uppercase">Store Manager</p>
+                <p className="text-[10px] text-white/40 tracking-widest uppercase">{roleLabel}</p>
               </div>
             )}
           </div>
@@ -96,7 +126,7 @@ export default function Sidebar() {
 
         {/* Navigation */}
         <nav className="flex-1 py-3 px-2.5 space-y-0.5 overflow-y-auto">
-          {navItems.map((item) => {
+          {visibleNav.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href;
 
@@ -123,11 +153,11 @@ export default function Sidebar() {
         <div className="md:hidden px-4 py-3 border-t border-white/10">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-full bg-stone-700 flex items-center justify-center text-white text-xs font-semibold">
-              A
+              {userInitials}
             </div>
             <div>
-              <p className="text-sm font-medium text-white">Admin</p>
-              <p className="text-[10px] text-white/40">Store Manager</p>
+              <p className="text-sm font-medium text-white">{userName}</p>
+              <p className="text-[10px] text-white/40">{roleLabel}</p>
             </div>
           </div>
         </div>

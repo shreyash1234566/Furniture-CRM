@@ -55,6 +55,11 @@ out.webp
 duck.html
 build_doc.html
 
+# uploaded files
+/public/uploads/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/app/generated/prisma

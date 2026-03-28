@@ -126,7 +126,7 @@ body {
   background: var(--color-surface-hover);
 }
 
-/* Form controls */
+/* Form controls — no padding here, Tailwind classes handle it per-component */
 select {
   appearance: none;
   background: var(--color-surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2378716c' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center;
@@ -142,7 +142,6 @@ input, textarea {
   color: var(--color-foreground);
   border: 1px solid var(--color-border);
   border-radius: 8px;
-  padding: 8px 12px;
   font-size: 0.78rem;
   transition: border-color 0.15s;
 }
@@ -155,6 +154,16 @@ input:focus, textarea:focus, select:focus {
 
 input::placeholder, textarea::placeholder {
   color: #a8a29e;
+}
+
+/* Hide native number input spinners — app uses custom +/- controls */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
 }
 
 ::selection {

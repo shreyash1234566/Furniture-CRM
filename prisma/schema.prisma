@@ -1,0 +1,830 @@
+generator client {
+  provider = "prisma-client-js"
+  runtime  = "nodejs"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── AUTH MODELS ─────────────────────────────────────
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  STAFF
+}
+
+model User {
+  id             Int       @id @default(autoincrement())
+  email          String    @unique
+  name           String
+  hashedPassword String
+  role           UserRole  @default(STAFF)
+  isActive       Boolean   @default(true)
+  staffId        Int?      @unique
+  staff          Staff?    @relation(fields: [staffId], references: [id])
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  accounts Account[]
+  sessions Session[]
+}
+
+model Account {
+  id                Int     @id @default(autoincrement())
+  userId            Int
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           Int      @id @default(autoincrement())
+  sessionToken String   @unique
+  userId       Int
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── CONTACT (Unified Customer Identity) ─────────────
+
+model Contact {
+  id        Int      @id @default(autoincrement())
+  name      String
+  phone     String   @unique
+  email     String?
+  address   String?
+  source    String?
+  notes             String?
+  emailSubscribed   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  leads         Lead[]
+  orders        Order[]
+  appointments  Appointment[]
+  invoices      Invoice[]
+  customOrders  CustomOrder[]
+  walkins       Walkin[]
+  callLogs      CallLog[]
+  conversations Conversation[]
+  reviews       Review[]
+
+  @@index([email])
+  @@index([emailSubscribed])
+}
+
+// ─── LEAD MANAGEMENT ─────────────────────────────────
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  SHOWROOM_VISIT
+  QUOTATION
+  WON
+  LOST
+}
+
+model Lead {
+  id           Int        @id @default(autoincrement())
+  contactId    Int
+  contact      Contact    @relation(fields: [contactId], references: [id])
+  interest     String
+  budget       String?
+  status       LeadStatus @default(NEW)
+  source       String?
+  date         DateTime   @default(now())
+  notes        String?
+  assignedToId Int?
+  assignedTo   Staff?     @relation(fields: [assignedToId], references: [id])
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  followUps FollowUp[]
+
+  @@index([status])
+  @@index([date])
+  @@index([assignedToId])
+}
+
+model FollowUp {
+  id      Int      @id @default(autoincrement())
+  leadId  Int
+  lead    Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  day     Int
+  message String
+  sent    Boolean  @default(false)
+  date    DateTime
+
+  @@index([leadId])
+}
+
+// ─── PRODUCTS & INVENTORY ────────────────────────────
+
+model Category {
+  id       Int       @id @default(autoincrement())
+  name     String    @unique
+  products Product[]
+}
+
+model Warehouse {
+  id       Int       @id @default(autoincrement())
+  name     String    @unique
+  address  String?
+  products Product[]
+}
+
+model Product {
+  id            Int        @id @default(autoincrement())
+  sku           String     @unique
+  name          String
+  categoryId    Int
+  category      Category   @relation(fields: [categoryId], references: [id])
+  price         Int
+  stock         Int        @default(0)
+  sold          Int        @default(0)
+  reorderLevel  Int        @default(5)
+  image         String?
+  material      String?
+  color         String?
+  description   String?
+  warehouseId   Int?
+  warehouse     Warehouse? @relation(fields: [warehouseId], references: [id])
+  lastRestocked DateTime?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  orders       Order[]
+  invoiceItems InvoiceItem[]
+  customOrders CustomOrder[]
+
+  @@index([categoryId])
+  @@index([sku])
+}
+
+// ─── ORDERS ──────────────────────────────────────────
+
+enum OrderStatus {
+  CONFIRMED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PAID
+  PARTIAL
+  PENDING
+}
+
+enum OrderSource {
+  STORE
+  AMAZON
+  FLIPKART
+  SHOPIFY
+}
+
+model Order {
+  id           Int           @id @default(autoincrement())
+  displayId    String        @unique
+  contactId    Int
+  contact      Contact       @relation(fields: [contactId], references: [id])
+  productId    Int
+  product      Product       @relation(fields: [productId], references: [id])
+  quantity     Int           @default(1)
+  amount       Int
+  status       OrderStatus   @default(CONFIRMED)
+  date         DateTime
+  deliveryDate DateTime?
+  payment      PaymentStatus @default(PENDING)
+  source       OrderSource   @default(STORE)
+  notes        String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([status])
+  @@index([source])
+  @@index([date])
+  @@index([contactId])
+}
+
+// ─── APPOINTMENTS ────────────────────────────────────
+
+model Appointment {
+  id        Int      @id @default(autoincrement())
+  contactId Int
+  contact   Contact  @relation(fields: [contactId], references: [id])
+  date      DateTime
+  time      String
+  purpose   String
+  status    String   @default("Scheduled")
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([date])
+  @@index([status])
+}
+
+// ─── INVOICES & BILLING ──────────────────────────────
+
+enum InvoiceStatus {
+  ACTIVE
+  CANCELLED
+  REFUNDED
+}
+
+model Invoice {
+  id            Int           @id @default(autoincrement())
+  displayId     String        @unique
+  contactId     Int
+  contact       Contact       @relation(fields: [contactId], references: [id])
+  subtotal      Int
+  discount      Int           @default(0)
+  discountType  String        @default("none")
+  gst           Int           @default(0)
+  cgst          Int           @default(0)
+  sgst          Int           @default(0)
+  total         Int
+  amountPaid    Int           @default(0)
+  balanceDue    Int           @default(0)
+  paymentMethod String        // primary payment method
+  paymentStatus PaymentStatus @default(PENDING)
+  invoiceStatus InvoiceStatus @default(ACTIVE)
+  date          DateTime
+  time          String?
+  dueDate       DateTime?
+  salespersonId Int?
+  salesperson   Staff?        @relation(fields: [salespersonId], references: [id])
+  notes         String?
+  heldAt        DateTime?     // non-null = parked/held bill
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  items    InvoiceItem[]
+  payments Payment[]
+  creditNotes CreditNote[]
+
+  @@index([date])
+  @@index([paymentStatus])
+  @@index([invoiceStatus])
+  @@index([contactId])
+}
+
+model InvoiceItem {
+  id        Int     @id @default(autoincrement())
+  invoiceId Int
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  productId Int
+  product   Product @relation(fields: [productId], references: [id])
+  name      String
+  sku       String
+  quantity  Int
+  price     Int
+  hsnCode   String?  // HSN/SAC code for GST
+
+  @@index([invoiceId])
+}
+
+model Payment {
+  id        Int      @id @default(autoincrement())
+  invoiceId Int
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amount    Int
+  method    String   // Cash, UPI, Card, EMI, Bank Transfer, Cheque
+  reference String?  // transaction ID, cheque number, etc.
+  date      DateTime @default(now())
+  notes     String?
+
+  @@index([invoiceId])
+  @@index([date])
+}
+
+model CreditNote {
+  id          Int      @id @default(autoincrement())
+  displayId   String   @unique
+  invoiceId   Int
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id])
+  amount      Int
+  reason      String
+  date        DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@index([invoiceId])
+  @@index([date])
+}
+
+// ─── CUSTOM ORDERS ───────────────────────────────────
+
+enum CustomOrderStatus {
+  MEASUREMENT_SCHEDULED
+  DESIGN_PHASE
+  IN_PRODUCTION
+  QUALITY_CHECK
+  INSTALLATION
+  DELIVERED
+}
+
+model CustomOrder {
+  id               Int               @id @default(autoincrement())
+  displayId        String            @unique
+  contactId        Int
+  contact          Contact           @relation(fields: [contactId], references: [id])
+  phone            String
+  address          String
+  type             String
+  status           CustomOrderStatus @default(MEASUREMENT_SCHEDULED)
+  assignedStaffId  Int?
+  assignedStaff    Staff?            @relation(fields: [assignedStaffId], references: [id])
+  date             DateTime
+  estimatedDelivery DateTime?
+  measurements     Json?
+  photos           String[]
+  referenceImages  String[]          // uploaded reference images
+  referenceProductId Int?
+  referenceProduct Product?          @relation(fields: [referenceProductId], references: [id])
+  materials        String?
+  color            String?
+  quotedPrice      Int?
+  advancePaid      Int               @default(0)
+  productionNotes  String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  timeline    CustomOrderTimeline[]
+  fieldVisits FieldVisit[]
+
+  @@index([status])
+  @@index([assignedStaffId])
+}
+
+model CustomOrderTimeline {
+  id            Int         @id @default(autoincrement())
+  customOrderId Int
+  customOrder   CustomOrder @relation(fields: [customOrderId], references: [id], onDelete: Cascade)
+  date          DateTime
+  event         String
+  notes         String?
+  status        String      @default("pending")
+  updatedBy     String?     // "Manager" or staff name
+
+  @@index([customOrderId])
+}
+
+// ─── WALK-INS ────────────────────────────────────────
+
+enum WalkinStatus {
+  BROWSING
+  INTERESTED
+  FOLLOW_UP
+  CONVERTED
+  LEFT
+}
+
+model Walkin {
+  id           Int          @id @default(autoincrement())
+  contactId    Int
+  contact      Contact      @relation(fields: [contactId], references: [id])
+  requirement  String
+  assignedToId Int?
+  assignedTo   Staff?       @relation("WalkinAssigned", fields: [assignedToId], references: [id])
+  date         DateTime
+  time         String
+  status       WalkinStatus @default(BROWSING)
+  budget       String?
+  notes        String?
+  source       String       @default("Walk-in")
+  visitDuration String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@index([date])
+  @@index([status])
+}
+
+// ─── STAFF ───────────────────────────────────────────
+
+model Staff {
+  id        Int      @id @default(autoincrement())
+  name      String
+  role      String
+  phone     String
+  email     String   @unique
+  status    String   @default("Active")
+  joinDate  DateTime
+  avatar    String?
+  stats     Json?
+  target    Json?
+  commission Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user         User?
+  leads        Lead[]
+  invoices     Invoice[]
+  customOrders CustomOrder[]
+  walkins      Walkin[]         @relation("WalkinAssigned")
+  attendance   Attendance[]
+  activities   StaffActivity[]
+  fieldVisits  FieldVisit[]
+  stockUpdates StockUpdate[]
+
+  @@index([email])
+}
+
+model Attendance {
+  id            Int      @id @default(autoincrement())
+  staffId       Int
+  staff         Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  date          DateTime
+  clockIn       String?
+  clockOut      String?
+  hours         Float?
+  status        String
+  // GPS tracking
+  clockInLat    Float?
+  clockInLng    Float?
+  clockOutLat   Float?
+  clockOutLng   Float?
+  clockInDist   Float?   // distance from store in meters
+  clockOutDist  Float?
+  method        String   @default("manual") // "gps", "manual"
+  isLate        Boolean  @default(false)
+
+  @@unique([staffId, date])
+  @@index([date])
+}
+
+model StaffActivity {
+  id      Int      @id @default(autoincrement())
+  staffId Int
+  staff   Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  type    String
+  text    String
+  time    String
+  date    DateTime
+
+  @@index([staffId])
+  @@index([date])
+}
+
+model FieldVisit {
+  id             Int          @id @default(autoincrement())
+  displayId      String
+  staffId        Int
+  staff          Staff        @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  customOrderId  Int?
+  customOrder    CustomOrder? @relation(fields: [customOrderId], references: [id])
+  customer       String
+  address        String
+  date           DateTime
+  time           String
+  scheduledDate  DateTime?    // when the visit is scheduled for
+  scheduledTime  String?      // time slot e.g. "10:00 AM - 12:00 PM"
+  status         String       // Scheduled, In Progress, Completed, Cancelled
+  completedAt    DateTime?
+  type           String
+  notes          String?
+  staffNotes     String?      // notes added by staff after visit
+  measurements   Json?
+  photos         Int          @default(0)
+  photoUrls      String[]
+
+  @@index([staffId])
+  @@index([customOrderId])
+  @@index([scheduledDate])
+}
+
+model StockUpdate {
+  id        Int      @id @default(autoincrement())
+  staffId   Int?
+  staff     Staff?   @relation(fields: [staffId], references: [id])
+  product   String
+  warehouse String
+  action    String
+  quantity  Int
+  date      DateTime
+  time      String
+
+  @@index([staffId])
+  @@index([date])
+}
+
+// ─── CALL LOGS ───────────────────────────────────────
+
+enum CallDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum CallStatus {
+  COMPLETED
+  MISSED
+  NO_ANSWER
+  BUSY
+}
+
+model CallLog {
+  id           Int           @id @default(autoincrement())
+  contactId    Int?
+  contact      Contact?      @relation(fields: [contactId], references: [id])
+  customerName String
+  phone        String
+  direction    CallDirection
+  status       CallStatus
+  duration     String?
+  durationSec  Int           @default(0)
+  agent        String        @default("AI Agent")
+  date         DateTime
+  time         String
+  purpose      String?
+  outcome      String?
+  notes        String?
+  recording    Boolean       @default(false)
+  createdAt    DateTime      @default(now())
+
+  transcript CallTranscript?
+
+  @@index([date])
+  @@index([contactId])
+}
+
+model CallTranscript {
+  id        Int     @id @default(autoincrement())
+  callLogId Int     @unique
+  callLog   CallLog @relation(fields: [callLogId], references: [id], onDelete: Cascade)
+  summary   String?
+  sentiment String?
+  messages  Json
+}
+
+// ─── CONVERSATIONS ───────────────────────────────────
+
+enum ConversationStatus {
+  AI_HANDLED
+  NEEDS_HUMAN
+  RESOLVED
+}
+
+model Conversation {
+  id           Int                @id @default(autoincrement())
+  contactId    Int?
+  contact      Contact?           @relation(fields: [contactId], references: [id])
+  customerName String
+  channel      String
+  externalId   String?            // platform-specific thread/chat ID (e.g. WhatsApp phone, IG thread)
+  status       ConversationStatus @default(AI_HANDLED)
+  lastMessage  String?
+  unread       Int                @default(0)
+  date         DateTime
+  messages     Json
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  @@index([channel])
+  @@index([status])
+  @@index([externalId])
+}
+
+// ─── REVIEWS ─────────────────────────────────────────
+
+model Review {
+  id           Int      @id @default(autoincrement())
+  contactId    Int?
+  contact      Contact? @relation(fields: [contactId], references: [id])
+  customerName String
+  rating       Int
+  text         String
+  date         DateTime
+  product      String
+  platform     String   @default("Google")
+  replied      Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  @@index([rating])
+  @@index([platform])
+}
+
+// ─── MARKETING CAMPAIGNS ─────────────────────────────
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  SENT
+}
+
+model Campaign {
+  id            Int            @id @default(autoincrement())
+  name          String
+  channel       String
+  status        CampaignStatus @default(DRAFT)
+  scheduledDate DateTime?
+  audience      Int            @default(0)
+  sent          Int            @default(0)
+  opened        Int            @default(0)
+  clicked       Int            @default(0)
+  template      String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+// ─── MARKETPLACE CHANNELS ────────────────────────────
+
+model MarketplaceChannel {
+  id        Int       @id @default(autoincrement())
+  slug      String    @unique
+  name      String
+  logo      String?
+  color     String?
+  connected Boolean   @default(false)
+  lastSync  DateTime?
+  sellerId  String?
+  config    Json?
+}
+
+// ─── STORE SETTINGS ──────────────────────────────────
+
+model StoreSettings {
+  id             Int      @id @default(1)
+  storeName      String   @default("Furniture Store")
+  phone          String?
+  email          String?
+  address        String?
+  gstNumber      String?
+  gstRate        Float    @default(18.0)
+  currency       String   @default("INR")
+  logo           String?
+  // Geofence for GPS attendance
+  storeLat       Float?
+  storeLng       Float?
+  geofenceRadius Int      @default(100) // meters
+  shiftStartTime String   @default("09:00") // HH:mm — late after this
+  shiftEndTime   String   @default("20:00") // HH:mm — shift ends
+  // SMTP Email Configuration
+  smtpHost       String?  // e.g. smtp.gmail.com, smtp.office365.com
+  smtpPort       Int?     @default(587)
+  smtpUser       String?  // email address used to send
+  smtpPass       String?  // app password / SMTP password
+  smtpFromName   String?  // "Furniture Store" — display name in From header
+  smtpSecure     Boolean  @default(false) // true for port 465 (SSL), false for 587 (STARTTLS)
+  smtpConfigured Boolean  @default(false) // true once test email succeeds
+  updatedAt      DateTime @updatedAt
+}
+
+// ─── STORE CAMPAIGNS (QR Codes) ──────────────────────
+
+model StoreCampaign {
+  id        Int      @id @default(autoincrement())
+  name      String
+  type      String
+  location  String
+  scans     Int      @default(0)
+  leads     Int      @default(0)
+  status    String   @default("Active")
+  purpose   String?
+  createdAt DateTime @default(now())
+}
+
+// ─── CHANNEL INTEGRATIONS ────────────────────────────
+
+model ChannelConfig {
+  id          Int      @id @default(autoincrement())
+  channel     String   @unique // WhatsApp, Instagram, Facebook, Website
+  enabled     Boolean  @default(false)
+  config      Json     // API keys, tokens, phone numbers, page IDs, etc.
+  webhookUrl  String?  // auto-generated webhook URL for this channel
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ─── EMAIL MARKETING ────────────────────────────────
+
+model EmailTemplate {
+  id          Int      @id @default(autoincrement())
+  name        String
+  subject     String
+  body        String   @db.Text // HTML body
+  category    String   @default("Promotional") // Promotional, Follow-up, New Collection, Offer, Nurture
+  variables   String[] // e.g. ["customerName", "offerCode"]
+  thumbnail   String?  // preview image
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  campaigns EmailCampaign[]
+}
+
+enum EmailCampaignStatus {
+  DRAFT
+  SCHEDULED
+  SENDING
+  SENT
+  PAUSED
+}
+
+model EmailCampaign {
+  id             Int                 @id @default(autoincrement())
+  name           String
+  subject        String
+  body           String              @db.Text
+  templateId     Int?
+  template       EmailTemplate?      @relation(fields: [templateId], references: [id])
+  status         EmailCampaignStatus @default(DRAFT)
+  scheduledAt    DateTime?
+  sentAt         DateTime?
+  audience       String              @default("all") // all, leads, customers, custom
+  audienceFilter Json?               // filter criteria for custom audience
+  totalRecipients Int               @default(0)
+  sent           Int                 @default(0)
+  opened         Int                 @default(0)
+  clicked        Int                 @default(0)
+  bounced        Int                 @default(0)
+  unsubscribed   Int                 @default(0)
+  // A/B testing
+  isABTest       Boolean             @default(false)
+  variantB       Json?               // { subject, body } for variant B
+  abSplitPercent Int                 @default(50) // % that get variant A
+  abWinner       String?             // "A" or "B"
+  // Automation
+  isAutomated    Boolean             @default(false)
+  triggerType    String?             // "new_lead", "post_visit", "abandoned_quote", "post_purchase"
+  triggerDelay   Int?                // delay in hours after trigger event
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  recipients EmailRecipient[]
+
+  @@index([status])
+  @@index([isAutomated, triggerType])
+}
+
+model EmailRecipient {
+  id           Int      @id @default(autoincrement())
+  campaignId   Int
+  campaign     EmailCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contactId    Int?
+  email        String
+  name         String
+  variant      String   @default("A") // A or B for A/B tests
+  status       String   @default("queued") // queued, sent, delivered, opened, clicked, bounced, unsubscribed
+  sentAt       DateTime?
+  openedAt     DateTime?
+  clickedAt    DateTime?
+  bouncedAt    DateTime?
+  opens        Int      @default(0)
+  clicks       Int      @default(0)
+
+  events EmailEvent[]
+
+  @@index([campaignId])
+  @@index([email])
+  @@index([status])
+}
+
+model EmailEvent {
+  id           Int      @id @default(autoincrement())
+  recipientId  Int
+  recipient    EmailRecipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  type         String   // open, click, bounce, unsubscribe
+  metadata     Json?    // { url, userAgent, ip, etc. }
+  createdAt    DateTime @default(now())
+
+  @@index([recipientId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+// ─── DRAFTS (soft-delete, auto-purge after 30 days) ───
+
+model Draft {
+  id          Int      @id @default(autoincrement())
+  sourceType  String   // "CustomOrder", "Lead", etc.
+  sourceId    String   // original displayId for reference
+  data        Json     // full snapshot of the deleted record
+  deletedBy   String   @default("Manager")
+  deletedAt   DateTime @default(now())
+  expiresAt   DateTime // deletedAt + 30 days
+
+  @@index([sourceType])
+  @@index([expiresAt])
+}

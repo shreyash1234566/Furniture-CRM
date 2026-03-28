@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { LayoutDashboard, Users, ShoppingCart, Package, MoreHorizontal } from 'lucide-react';
 import { useState } from 'react';
+import { useSession } from 'next-auth/react';
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -14,24 +15,34 @@ const navItems = [
 
 const moreItems = [
   { href: '/walkins', label: 'Walk-ins' },
-  { href: '/staff', label: 'Staff' },
+  { href: '/staff', label: 'Staff', roles: ['ADMIN', 'MANAGER'] },
   { href: '/staff-portal', label: 'Staff Portal' },
   { href: '/appointments', label: 'Appointments' },
-  { href: '/billing', label: 'Billing & POS' },
+  { href: '/billing', label: 'Billing & POS', roles: ['ADMIN', 'MANAGER'] },
   { href: '/custom-orders', label: 'Custom Orders' },
-  { href: '/marketing', label: 'Marketing' },
+  { href: '/drafts', label: 'Drafts', roles: ['ADMIN', 'MANAGER'] },
+  { href: '/email-marketing', label: 'Email Marketing', roles: ['ADMIN', 'MANAGER'] },
+  { href: '/marketing', label: 'Marketing', roles: ['ADMIN', 'MANAGER'] },
   { href: '/conversations', label: 'Conversations' },
   { href: '/calls', label: 'Call Center' },
   { href: '/reviews', label: 'Reviews' },
   { href: '/recommend', label: 'AI Recommend' },
-  { href: '/settings', label: 'Settings' },
+  { href: '/settings', label: 'Settings', roles: ['ADMIN'] },
 ];
 
 export default function BottomNav() {
   const pathname = usePathname();
   const [showMore, setShowMore] = useState(false);
+  const { data: session } = useSession();
 
-  const isMoreActive = moreItems.some(item => pathname === item.href);
+  const userRole = session?.user?.role || 'STAFF';
+
+  const visibleMore = moreItems.filter(item => {
+    if (!item.roles) return true;
+    return item.roles.includes(userRole);
+  });
+
+  const isMoreActive = visibleMore.some(item => pathname === item.href);
 
   return (
     <>
@@ -44,7 +55,7 @@ export default function BottomNav() {
             onClick={e => e.stopPropagation()}
           >
             <div className="grid grid-cols-3 gap-1">
-              {moreItems.map(item => (
+              {visibleMore.map(item => (
                 <Link
                   key={item.href}
                   href={item.href}
