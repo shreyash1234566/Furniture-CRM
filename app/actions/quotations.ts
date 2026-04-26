@@ -27,13 +27,88 @@ const defaultTerms = [
   'Once order is confirmed, amendment or cancellation is not allowed.',
 ]
 
+type QuotationBankDetails = {
+  accountName?: string
+  bankName?: string
+  accountNumber?: string
+  ifscCode?: string
+  branchName?: string
+  upiId?: string
+}
+
+const BANK_DETAILS_MARKER = '[[BANK_DETAILS]]'
+const BANK_DETAILS_END_MARKER = '[[/BANK_DETAILS]]'
+
+function normalizeBankDetails(details?: QuotationBankDetails | null): QuotationBankDetails {
+  return {
+    accountName: details?.accountName?.trim() || '',
+    bankName: details?.bankName?.trim() || '',
+    accountNumber: details?.accountNumber?.trim() || '',
+    ifscCode: details?.ifscCode?.trim() || '',
+    branchName: details?.branchName?.trim() || '',
+    upiId: details?.upiId?.trim() || '',
+  }
+}
+
+function hasAnyBankDetails(details: QuotationBankDetails) {
+  return Object.values(details).some(value => Boolean(value))
+}
+
+function parseNotesMetadata(notes?: string | null): { bankDetails: QuotationBankDetails; cleanNotes: string } {
+  const rawNotes = String(notes || '')
+  const markerIndex = rawNotes.indexOf(BANK_DETAILS_MARKER)
+  const endMarkerIndex = rawNotes.indexOf(BANK_DETAILS_END_MARKER)
+
+  if (markerIndex === -1 || endMarkerIndex === -1 || endMarkerIndex < markerIndex) {
+    return {
+      bankDetails: normalizeBankDetails(),
+      cleanNotes: rawNotes.trim(),
+    }
+  }
+
+  const jsonChunk = rawNotes
+    .slice(markerIndex + BANK_DETAILS_MARKER.length, endMarkerIndex)
+    .trim()
+
+  let parsedDetails: QuotationBankDetails = {}
+  try {
+    parsedDetails = JSON.parse(jsonChunk) as QuotationBankDetails
+  } catch {
+    parsedDetails = {}
+  }
+
+  const before = rawNotes.slice(0, markerIndex).trim()
+  const after = rawNotes.slice(endMarkerIndex + BANK_DETAILS_END_MARKER.length).trim()
+  const cleanNotes = [before, after].filter(Boolean).join('\n').trim()
+
+  return {
+    bankDetails: normalizeBankDetails(parsedDetails),
+    cleanNotes,
+  }
+}
+
+function buildNotesWithMetadata(notes?: string | null, bankDetails?: QuotationBankDetails | null) {
+  const cleanNotes = String(notes || '').trim()
+  const normalizedBankDetails = normalizeBankDetails(bankDetails)
+
+  if (!hasAnyBankDetails(normalizedBankDetails)) {
+    return cleanNotes || null
+  }
+
+  const metadata = `${BANK_DETAILS_MARKER}${JSON.stringify(normalizedBankDetails)}${BANK_DETAILS_END_MARKER}`
+  return cleanNotes ? `${metadata}\n${cleanNotes}` : metadata
+}
+
 function formatQuotation(quotation: QuotationWithRelations) {
+  const { bankDetails, cleanNotes } = parseNotesMetadata(quotation.notes)
+
   const sortedItems = [...quotation.items]
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map(item => ({
       id: item.id,
       productId: item.productId,
       productName: item.product?.name || null,
+      productImage: item.product?.image || null,
       name: item.name,
       sku: item.sku,
       description: item.description,
@@ -67,7 +142,8 @@ function formatQuotation(quotation: QuotationWithRelations) {
     gstAmount: quotation.gstAmount,
     totalBeforeTax: quotation.totalBeforeTax,
     grandTotal: quotation.grandTotal,
-    notes: quotation.notes,
+    notes: cleanNotes,
+    bankDetails,
     termsAndConditions: quotation.termsAndConditions,
     status: statusDisplay[quotation.status],
     statusKey: quotation.status,
@@ -122,6 +198,7 @@ export async function createQuotation(data: unknown) {
     freightCharge,
     loadingCharge,
     gstPercent,
+    bankDetails,
     notes,
     termsAndConditions,
     items,
@@ -197,6 +274,7 @@ export async function createQuotation(data: unknown) {
   const totalBeforeTax = subtotal + installationCharge + freightCharge + loadingCharge
   const gstAmount = Math.round((totalBeforeTax * gstPercent) / 100)
   const grandTotal = totalBeforeTax + gstAmount
+  const notesWithMetadata = buildNotesWithMetadata(notes, bankDetails)
 
   const lastQuotation = await prisma.quotation.findFirst({
     orderBy: { id: 'desc' },
@@ -230,7 +308,7 @@ export async function createQuotation(data: unknown) {
       gstAmount,
       totalBeforeTax,
       grandTotal,
-      notes,
+      notes: notesWithMetadata,
       termsAndConditions: termsAndConditions.length > 0 ? termsAndConditions : defaultTerms,
       status: 'DRAFT',
       items: {
@@ -267,6 +345,7 @@ export async function updateQuotation(data: unknown) {
     freightCharge,
     loadingCharge,
     gstPercent,
+    bankDetails,
     notes,
     termsAndConditions,
     items,
@@ -353,6 +432,8 @@ export async function updateQuotation(data: unknown) {
   const totalBeforeTax = subtotal + installationCharge + freightCharge + loadingCharge
   const gstAmount = Math.round((totalBeforeTax * gstPercent) / 100)
   const grandTotal = totalBeforeTax + gstAmount
+  const { bankDetails: existingBankDetails, cleanNotes: existingCleanNotes } = parseNotesMetadata(existing.notes)
+  const notesWithMetadata = buildNotesWithMetadata(notes ?? existingCleanNotes, bankDetails ?? existingBankDetails)
 
   const quotation = await prisma.quotation.update({
     where: { id },
@@ -374,7 +455,7 @@ export async function updateQuotation(data: unknown) {
       gstAmount,
       totalBeforeTax,
       grandTotal,
-      notes,
+      notes: notesWithMetadata,
       termsAndConditions: termsAndConditions.length > 0 ? termsAndConditions : defaultTerms,
       items: {
         deleteMany: {},

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Wallet, Users, Calendar, CheckCircle, Eye, CreditCard,
   AlertCircle, IndianRupee, Printer, Edit2, Save, X,
@@ -9,7 +9,7 @@ import {
 import {
   generatePayroll, getPayrollHistory, getPayrollRun, getAllPayslips,
   approvePayroll, markPayrollPaid, getStaffForPayroll, updateStaffPayrollInfo,
-  getStaffLoans, createStaffLoan, closeStaffLoan
+  getStaffLoans, createStaffLoan, closeStaffLoan, getPayrollReadiness
 } from '@/app/actions/payroll'
 import Modal from '@/components/Modal'
 
@@ -48,6 +48,8 @@ export default function PayrollPage() {
   const [workingDays, setWorkingDays] = useState(26)
   const [generating, setGenerating] = useState(false)
   const [generatedRun, setGeneratedRun] = useState(null)
+  const [readiness, setReadiness] = useState(null)
+  const [readinessLoading, setReadinessLoading] = useState(false)
 
   // Payslips
   const [payslips, setPayslips] = useState([])
@@ -66,7 +68,7 @@ export default function PayrollPage() {
   const [bankAdviceRun, setBankAdviceRun] = useState(null)
   const bankRef = useRef(null)
 
-  const loadAll = async () => {
+  const loadAll = useCallback(async () => {
     setLoading(true)
     const [histRes, staffRes, loanRes] = await Promise.all([
       getPayrollHistory(), getStaffForPayroll(), getStaffLoans()
@@ -75,15 +77,36 @@ export default function PayrollPage() {
     if (staffRes.success) setStaffList(staffRes.data)
     if (loanRes.success) setLoans(loanRes.data)
     setLoading(false)
-  }
+  }, [])
 
-  const loadPayslips = async () => {
-    const res = await getAllPayslips(payslipPeriodFilter || undefined)
+  const loadPayslips = useCallback(async (periodFilter = '') => {
+    const res = await getAllPayslips(periodFilter || undefined)
     if (res.success) setPayslips(res.data)
-  }
+  }, [])
 
-  useEffect(() => { loadAll() }, [])
-  useEffect(() => { if (tab === 'payslips') loadPayslips() }, [tab, payslipPeriodFilter])
+  const loadReadiness = useCallback(async (periodToCheck = period) => {
+    setReadinessLoading(true)
+    const res = await getPayrollReadiness(periodToCheck)
+    if (res.success) setReadiness(res.data)
+    setReadinessLoading(false)
+  }, [period])
+
+  useEffect(() => {
+    const timer = setTimeout(() => { void loadAll() }, 0)
+    return () => clearTimeout(timer)
+  }, [loadAll])
+
+  useEffect(() => {
+    if (tab !== 'payslips') return
+    const timer = setTimeout(() => { void loadPayslips(payslipPeriodFilter) }, 0)
+    return () => clearTimeout(timer)
+  }, [tab, payslipPeriodFilter, loadPayslips])
+
+  useEffect(() => {
+    if (tab !== 'process' && tab !== 'setup') return
+    const timer = setTimeout(() => { void loadReadiness(period) }, 0)
+    return () => clearTimeout(timer)
+  }, [tab, period, loadReadiness])
 
   // ── Staff setup ──
   const startEditStaff = (s) => {
@@ -146,12 +169,18 @@ export default function PayrollPage() {
 
   // ── Payroll ──
   const handleGenerate = async () => {
+    if (readiness?.blockers?.length > 0) {
+      alert(`Cannot generate payroll:\n\n${readiness.blockers.join('\n')}`)
+      return
+    }
+
     const unconfigured = staffList.filter(s => !s.basicSalary)
     if (unconfigured.length > 0 && !confirm(`${unconfigured.length} staff have ₹0 basic salary. Continue?`)) return
+
     setGenerating(true)
     setGeneratedRun(null)
     const res = await generatePayroll({ period, workingDays: Number(workingDays) })
-    if (res.success) { setGeneratedRun(res.data); loadAll() }
+    if (res.success) { setGeneratedRun(res.data); loadAll(); loadReadiness(period) }
     else alert(res.error)
     setGenerating(false)
   }
@@ -166,6 +195,17 @@ export default function PayrollPage() {
     if (!confirm('Mark entire payroll as PAID? This cannot be undone.')) return
     const res = await markPayrollPaid(id)
     if (res.success) loadAll()
+    else alert(res.error)
+  }
+
+  const openBankAdvice = async (runSummary) => {
+    if (runSummary?.payslips?.length) {
+      setBankAdviceRun(runSummary)
+      return
+    }
+
+    const res = await getPayrollRun(runSummary.id)
+    if (res.success) setBankAdviceRun(res.data)
     else alert(res.error)
   }
 
@@ -375,11 +415,44 @@ export default function PayrollPage() {
                 <input type="number" min="1" max="31" value={workingDays} onChange={e => setWorkingDays(e.target.value)} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
               </div>
               <div className="flex items-end">
-                <button onClick={handleGenerate} disabled={generating || staffList.length === 0}
+                <button onClick={handleGenerate} disabled={generating || staffList.length === 0 || readinessLoading || readiness?.blockers?.length > 0}
                   className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50 flex items-center justify-center gap-2">
                   {generating ? <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> Calculating...</> : <><Wallet className="w-4 h-4" /> Generate Payroll</>}
                 </button>
               </div>
+            </div>
+
+            <div className="bg-surface-hover border border-border rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-medium text-foreground">Pre-Payroll Readiness</p>
+                <button
+                  onClick={() => loadReadiness(period)}
+                  className="px-2.5 py-1 text-xs rounded border border-border text-muted hover:text-foreground"
+                >
+                  Refresh
+                </button>
+              </div>
+              {readinessLoading ? (
+                <p className="text-xs text-muted">Checking payroll readiness...</p>
+              ) : readiness ? (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted">Period: {readiness.period} · Active staff: {readiness.activeStaff}</p>
+                  {readiness.blockers.length > 0 ? (
+                    <div className="text-xs text-red-400 bg-red-500/5 border border-red-500/20 rounded p-2">
+                      {readiness.blockers.map((b, i) => <p key={i}>• {b}</p>)}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-emerald-400">No blocking issues found.</p>
+                  )}
+                  {readiness.warnings.length > 0 && (
+                    <div className="text-xs text-amber-400 bg-amber-500/5 border border-amber-500/20 rounded p-2">
+                      {readiness.warnings.map((w, i) => <p key={i}>• {w}</p>)}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-muted">Readiness details are not available.</p>
+              )}
             </div>
 
             {/* Calculation legend */}
@@ -473,7 +546,7 @@ export default function PayrollPage() {
 
               {/* Bank Advice */}
               <div className="flex justify-end mt-3">
-                <button onClick={() => setBankAdviceRun(generatedRun)}
+                <button onClick={() => openBankAdvice(generatedRun)}
                   className="px-4 py-2 bg-surface-hover text-muted hover:text-foreground rounded-lg text-sm flex items-center gap-2 border border-border">
                   <Landmark className="w-4 h-4" /> Bank Payment Advice
                 </button>
@@ -621,7 +694,7 @@ export default function PayrollPage() {
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
                       <button onClick={() => viewRun(h.id)} className="p-1.5 rounded hover:bg-surface-hover text-muted hover:text-foreground" title="View"><Eye className="w-4 h-4" /></button>
-                      <button onClick={() => setBankAdviceRun(h)} className="p-1.5 rounded hover:bg-surface-hover text-muted hover:text-foreground" title="Bank Advice"><Landmark className="w-4 h-4" /></button>
+                      <button onClick={() => openBankAdvice(h)} className="p-1.5 rounded hover:bg-surface-hover text-muted hover:text-foreground" title="Bank Advice"><Landmark className="w-4 h-4" /></button>
                       {h.status === 'DRAFT' && <button onClick={() => handleApprove(h.id)} className="p-1.5 rounded hover:bg-blue-500/10 text-muted hover:text-blue-400" title="Approve"><ShieldCheck className="w-4 h-4" /></button>}
                       {h.status === 'APPROVED' && <button onClick={() => handleMarkPaid(h.id)} className="p-1.5 rounded hover:bg-emerald-500/10 text-muted hover:text-emerald-400" title="Mark Paid"><CreditCard className="w-4 h-4" /></button>}
                     </div>

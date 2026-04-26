@@ -10,6 +10,15 @@ export const quotationItemSchema = z.object({
   referenceImage: z.string().optional(),
 })
 
+export const quotationBankDetailsSchema = z.object({
+  accountName: z.string().optional(),
+  bankName: z.string().optional(),
+  accountNumber: z.string().optional(),
+  ifscCode: z.string().optional(),
+  branchName: z.string().optional(),
+  upiId: z.string().optional(),
+})
+
 export const createQuotationSchema = z.object({
   customer: z.string().min(1, 'Customer name is required'),
   phone: z.string().min(10, 'Phone must be at least 10 digits'),
@@ -25,6 +34,7 @@ export const createQuotationSchema = z.object({
   freightCharge: z.number().min(0).default(0),
   loadingCharge: z.number().min(0).default(0),
   gstPercent: z.number().min(0).max(100).default(18),
+  bankDetails: quotationBankDetailsSchema.optional(),
   notes: z.string().optional(),
   termsAndConditions: z.array(z.string()).default([]),
   items: z.array(quotationItemSchema).min(1, 'At least one item is required'),

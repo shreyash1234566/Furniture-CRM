@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback, Fragment } from 'react'
 import {
   BarChart3, TrendingUp, TrendingDown, Plus, RefreshCw,
   FileText, BookOpen, AlertCircle, ChevronDown, ChevronUp,
@@ -100,72 +100,81 @@ export default function FinancialsPage() {
   const jrnCreditTotal = journalForm.lines.reduce((s, l) => s + Number(l.credit || 0), 0)
   const jrnBalanced = Math.abs(jrnDebitTotal - jrnCreditTotal) <= 1
 
-  const loadBase = () => {
+  const loadBase = useCallback((from, to) => {
     setLoading(true)
-    Promise.all([getAccounts(), getJournalEntries(jrnFilter.from, jrnFilter.to)]).then(([accRes, jrnRes]) => {
+    Promise.all([getAccounts(), getJournalEntries(from, to)]).then(([accRes, jrnRes]) => {
       if (accRes.success) setAccounts(accRes.data)
       if (jrnRes.success) setJournals(jrnRes.data)
       setLoading(false)
     })
-  }
+  }, [])
 
-  useEffect(() => { seedChartOfAccounts().then(() => loadBase()) }, [])
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void seedChartOfAccounts().then(() => loadBase(fyStart, today))
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [loadBase, fyStart, today])
 
   // ── Report fetchers ────────────────────────────────
 
-  const fetchPnL = async () => {
+  const fetchPnL = useCallback(async () => {
     setReportLoading(true)
     const res = await getProfitAndLoss(fromDate, toDate, compareEnabled ? compareFrom : undefined, compareEnabled ? compareTo : undefined)
     if (res.success) setPnlData(res.data)
     else alert(res.error)
     setReportLoading(false)
-  }
+  }, [fromDate, toDate, compareEnabled, compareFrom, compareTo])
 
-  const fetchBS = async () => {
+  const fetchBS = useCallback(async () => {
     setReportLoading(true)
     const res = await getBalanceSheet(asOfDate)
     if (res.success) setBsData(res.data)
     else alert(res.error)
     setReportLoading(false)
-  }
+  }, [asOfDate])
 
-  const fetchCF = async () => {
+  const fetchCF = useCallback(async () => {
     setReportLoading(true)
     const res = await getCashFlow(fromDate, toDate)
     if (res.success) setCfData(res.data)
     else alert(res.error)
     setReportLoading(false)
-  }
+  }, [fromDate, toDate])
 
-  const fetchTB = async () => {
+  const fetchTB = useCallback(async () => {
     setReportLoading(true)
     const res = await getTrialBalance(asOfDate)
     if (res.success) setTbData(res.data)
     else alert(res.error)
     setReportLoading(false)
-  }
+  }, [asOfDate])
 
-  const fetchAging = async () => {
+  const fetchAging = useCallback(async () => {
     setReportLoading(true)
     const [recRes, payRes] = await Promise.all([getReceivablesAging(), getPayablesAging()])
     if (recRes.success) setRecAging(recRes.data)
     if (payRes.success) setPayAging(payRes.data)
     setReportLoading(false)
-  }
+  }, [])
 
-  const fetchJournals = async () => {
+  const fetchJournals = useCallback(async () => {
     const res = await getJournalEntries(jrnFilter.from, jrnFilter.to)
     if (res.success) setJournals(res.data)
-  }
+  }, [jrnFilter.from, jrnFilter.to])
 
   // Auto-load when switching tabs
   useEffect(() => {
-    if (tab === 'aging' && !recAging) fetchAging()
-    if (tab === 'trialbalance' && !tbData) fetchTB()
-    if (tab === 'pnl' && !pnlData) fetchPnL()
-    if (tab === 'bs' && !bsData) fetchBS()
-    if (tab === 'cf' && !cfData) fetchCF()
-  }, [tab])
+    const timer = setTimeout(() => {
+      if (tab === 'aging' && !recAging) void fetchAging()
+      if (tab === 'trialbalance' && !tbData) void fetchTB()
+      if (tab === 'pnl' && !pnlData) void fetchPnL()
+      if (tab === 'bs' && !bsData) void fetchBS()
+      if (tab === 'cf' && !cfData) void fetchCF()
+    }, 0)
+
+    return () => clearTimeout(timer)
+  }, [tab, recAging, tbData, pnlData, bsData, cfData, fetchAging, fetchTB, fetchPnL, fetchBS, fetchCF])
 
   // ── Journal actions ────────────────────────────────
 
@@ -196,7 +205,7 @@ export default function FinancialsPage() {
     if (res.success) {
       setShowAccountModal(false)
       setAccountForm({ code: '', name: '', groupId: '', openingBalance: 0 })
-      loadBase()
+      loadBase(jrnFilter.from, jrnFilter.to)
     } else alert(res.error)
     setSubmitting(false)
   }
@@ -760,7 +769,7 @@ export default function FinancialsPage() {
           </tr></thead>
           <tbody>
             {journals.map(j => (
-              <>
+              <Fragment key={j.id}>
                 <tr key={j.id}
                   className={`border-b border-border/50 hover:bg-surface-hover transition-colors cursor-pointer ${j.status === 'VOIDED' ? 'opacity-50' : ''}`}
                   onClick={() => setExpandedJournal(expandedJournal === j.id ? null : j.id)}>
@@ -803,7 +812,7 @@ export default function FinancialsPage() {
                     </td>
                   </tr>
                 )}
-              </>
+              </Fragment>
             ))}
           </tbody>
         </table>

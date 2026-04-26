@@ -51,17 +51,133 @@ const PT_SLABS: Record<string, { upTo: number; tax: number }[]> = {
   None: [{ upTo: Infinity, tax: 0 }],
 }
 
-function calcProfessionalTax(state: string, grossSalary: number): number {
+function calcProfessionalTax(state: string, grossSalary: number, period?: string): number {
   const slabs = PT_SLABS[state] || PT_SLABS['None']
   for (const slab of slabs) {
-    if (grossSalary <= slab.upTo) return slab.tax
+    if (grossSalary <= slab.upTo) {
+      // Maharashtra has an extra PT charge in February for higher salary slabs.
+      if (state === 'Maharashtra' && slab.tax === 200 && grossSalary > 10000 && period) {
+        const month = Number(period.split('-')[1])
+        if (month === 2) return 300
+      }
+      return slab.tax
+    }
   }
   return 0
+}
+
+function attendanceDayCredit(status: string): number {
+  const normalized = (status || '').trim().toLowerCase()
+  if (normalized === 'absent' || normalized === 'off duty' || normalized === 'off-duty') return 0
+  if (normalized === 'half day' || normalized === 'half-day') return 0.5
+  return 1
+}
+
+function overtimeHoursFromAttendance(entries: { status: string; hours: number | null }[]): number {
+  return entries.reduce((sum, entry) => {
+    const status = (entry.status || '').trim().toUpperCase()
+
+    if (status === 'OT') {
+      return sum + Math.max(0, entry.hours || 0)
+    }
+
+    const dayCredit = attendanceDayCredit(entry.status)
+    if (dayCredit <= 0 || entry.hours == null) return sum
+
+    const baselineHours = dayCredit >= 1 ? 8 : 4
+    return sum + Math.max(0, entry.hours - baselineHours)
+  }, 0)
+}
+
+// ─── PRE-PAYROLL READINESS ──────────────────────────
+
+export async function getPayrollReadiness(period?: string) {
+  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+
+  const targetPeriod = period || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`
+  const [year, month] = targetPeriod.split('-').map(Number)
+  const monthStart = new Date(year, month - 1, 1)
+  const nextMonth = month === 12 ? new Date(year + 1, 0, 1) : new Date(year, month, 1)
+
+  const [staffList, attendanceRows] = await Promise.all([
+    prisma.staff.findMany({
+      where: { status: 'Active' },
+      select: {
+        id: true,
+        name: true,
+        basicSalary: true,
+        bankAccount: true,
+        bankName: true,
+        ifscCode: true,
+        pfEnrolled: true,
+        uanNumber: true,
+        esiEnrolled: true,
+        esiNumber: true,
+        panNumber: true,
+        tdsMonthly: true,
+      },
+      orderBy: { name: 'asc' },
+    }),
+    prisma.attendance.findMany({
+      where: { date: { gte: monthStart, lt: nextMonth } },
+      select: { staffId: true },
+    }),
+  ])
+
+  const staffWithAttendance = new Set(attendanceRows.map(row => row.staffId))
+
+  const missingBasic = staffList.filter(s => !s.basicSalary).map(s => s.name)
+  const missingBankDetails = staffList
+    .filter(s => !s.bankAccount || !s.bankName || !s.ifscCode)
+    .map(s => s.name)
+  const missingPFCompliance = staffList
+    .filter(s => s.pfEnrolled && !s.uanNumber)
+    .map(s => s.name)
+  const missingESICompliance = staffList
+    .filter(s => s.esiEnrolled && !s.esiNumber)
+    .map(s => s.name)
+  const missingPanForTds = staffList
+    .filter(s => (s.tdsMonthly || 0) > 0 && !s.panNumber)
+    .map(s => s.name)
+  const noAttendanceConfigured = staffList
+    .filter(s => !staffWithAttendance.has(s.id))
+    .map(s => s.name)
+
+  const blockers: string[] = []
+  const warnings: string[] = []
+
+  if (staffList.length === 0) blockers.push('No active staff found.')
+  if (missingBasic.length > 0) blockers.push(`${missingBasic.length} staff are missing basic salary.`)
+  if (missingBankDetails.length > 0) warnings.push(`${missingBankDetails.length} staff are missing bank details (A/C, bank name, or IFSC).`)
+  if (missingPFCompliance.length > 0) warnings.push(`${missingPFCompliance.length} PF-enrolled staff are missing UAN.`)
+  if (missingESICompliance.length > 0) warnings.push(`${missingESICompliance.length} ESI-enrolled staff are missing ESI number.`)
+  if (missingPanForTds.length > 0) warnings.push(`${missingPanForTds.length} staff have TDS set but PAN is missing.`)
+  if (noAttendanceConfigured.length > 0) warnings.push(`${noAttendanceConfigured.length} staff have no attendance in this period; full working days will be assumed.`)
+
+  return {
+    success: true,
+    data: {
+      period: targetPeriod,
+      activeStaff: staffList.length,
+      blockers,
+      warnings,
+      details: {
+        missingBasic,
+        missingBankDetails,
+        missingPFCompliance,
+        missingESICompliance,
+        missingPanForTds,
+        noAttendanceConfigured,
+      },
+    },
+  }
 }
 
 // ─── STAFF PAYROLL SETTINGS ──────────────────────────
 
 export async function getStaffForPayroll() {
+  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied', data: [] } }
+
   const staff = await prisma.staff.findMany({
     where: { status: 'Active' },
     select: {
@@ -97,9 +213,14 @@ const loanSchema = z.object({
   monthlyInstallment: z.number().min(1),
   startPeriod: z.string().regex(/^\d{4}-\d{2}$/),
   notes: z.string().optional(),
+}).refine((data) => data.monthlyInstallment <= data.principalAmount, {
+  message: 'Monthly installment cannot exceed principal amount',
+  path: ['monthlyInstallment'],
 })
 
 export async function getStaffLoans(staffId?: number) {
+  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied', data: [] } }
+
   const loans = await prisma.staffLoan.findMany({
     where: staffId ? { staffId } : undefined,
     include: { staff: { select: { name: true, role: true } } },
@@ -112,6 +233,11 @@ export async function createStaffLoan(data: unknown) {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   const parsed = loanSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
+
+  const staff = await prisma.staff.findUnique({ where: { id: parsed.data.staffId }, select: { status: true } })
+  if (!staff || staff.status !== 'Active') {
+    return { success: false, error: 'Loan can only be created for active staff.' }
+  }
 
   const loan = await prisma.staffLoan.create({
     data: {
@@ -133,7 +259,8 @@ export async function closeStaffLoan(id: number) {
 // ─── GENERATE PAYROLL ────────────────────────────────
 
 export async function generatePayroll(data: unknown) {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
+  let session
+  try { session = await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
   const parsed = generatePayrollSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -167,23 +294,30 @@ export async function generatePayroll(data: unknown) {
     return { success: false, error: 'No active staff found. Add staff before generating payroll.' }
   }
 
+  const staffMissingBasic = staffList.filter(staff => (staff.basicSalary || 0) <= 0)
+  if (staffMissingBasic.length > 0) {
+    return { success: false, error: `Configure basic salary for ${staffMissingBasic.length} staff before generating payroll.` }
+  }
+
   let totalGross = 0, totalDeductions = 0, totalNet = 0, totalEmployerContributions = 0
 
   const payslipData = staffList.map(staff => {
     // Attendance
+    const attendanceCredits = staff.attendance.length > 0
+      ? staff.attendance.reduce((sum, entry) => sum + attendanceDayCredit(entry.status), 0)
+      : workingDays
+    const payableDays = Math.min(workingDays, Math.max(0, attendanceCredits))
     const presentDays = staff.attendance.length > 0
-      ? staff.attendance.filter(a => a.status !== 'Absent').length
+      ? Math.min(workingDays, staff.attendance.filter(a => attendanceDayCredit(a.status) > 0).length)
       : workingDays
 
-    // OT: sum hours flagged as overtime (status === 'OT') — double rate
-    const otHours = staff.attendance
-      .filter(a => a.status === 'OT')
-      .reduce((sum, a) => sum + (a.hours || 8), 0)
+    // OT: explicitly marked OT entries or hours beyond baseline shift.
+    const otHours = overtimeHoursFromAttendance(staff.attendance)
 
     // Basic (pro-rated)
     const basic = staff.basicSalary || 0
     const dailyRate = workingDays > 0 ? basic / workingDays : 0
-    const effectiveBasic = Math.round(dailyRate * Math.min(presentDays, workingDays))
+    const effectiveBasic = Math.round(dailyRate * payableDays)
 
     // Earnings
     const hra = Math.round(effectiveBasic * 0.40)           // 40%
@@ -203,17 +337,22 @@ export async function generatePayroll(data: unknown) {
     const esiEmployer = (staff.esiEnrolled && grossSalary <= 21000) ? Math.round(grossSalary * 0.0325) : 0
 
     // Professional Tax (state-wise slab on gross)
-    const professionalTax = calcProfessionalTax(staff.professionalTaxState || 'None', grossSalary)
+    const professionalTax = calcProfessionalTax(staff.professionalTaxState || 'None', grossSalary, period)
 
     // TDS (fixed monthly amount configured per staff)
     const tds = staff.tdsMonthly || 0
 
-    // Loan deductions — deduct installment from each active loan
-    let loanDeduction = 0
-    for (const loan of staff.loans) {
+    // Loan deductions — only loans that have started by this payroll period
+    let requestedLoanDeduction = 0
+    const eligibleLoans = staff.loans.filter(loan => loan.startPeriod <= period)
+    for (const loan of eligibleLoans) {
       const installment = Math.min(loan.monthlyInstallment, loan.remainingAmount)
-      loanDeduction += installment
+      requestedLoanDeduction += installment
     }
+
+    // Guard against over-deduction; loan recovery should not push net below zero by itself.
+    const maxLoanRecoverable = Math.max(0, grossSalary - (pfEmployee + esiEmployee + professionalTax + tds))
+    const loanDeduction = Math.min(requestedLoanDeduction, maxLoanRecoverable)
 
     const totalDeductionsStaff = pfEmployee + esiEmployee + professionalTax + tds + loanDeduction
     const netSalary = Math.max(0, grossSalary - totalDeductionsStaff)
@@ -265,6 +404,7 @@ export async function generatePayroll(data: unknown) {
         totalDeductions,
         totalNet,
         employerContributions: totalEmployerContributions,
+        processedBy: session?.user?.name || session?.user?.email || null,
         payslips: { create: payslipData },
       },
       include: {
@@ -283,21 +423,6 @@ export async function generatePayroll(data: unknown) {
       },
     })
 
-    // Deduct loan installments from remaining balances
-    for (const staff of staffList) {
-      for (const loan of staff.loans) {
-        const installment = Math.min(loan.monthlyInstallment, loan.remainingAmount)
-        const newRemaining = loan.remainingAmount - installment
-        await tx.staffLoan.update({
-          where: { id: loan.id },
-          data: {
-            remainingAmount: newRemaining,
-            status: newRemaining <= 0 ? 'Closed' : 'Active',
-          },
-        })
-      }
-    }
-
     return newRun
   })
 
@@ -308,6 +433,8 @@ export async function generatePayroll(data: unknown) {
 // ─── PAYROLL RUNS ────────────────────────────────────
 
 export async function getPayrollHistory() {
+  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied', data: [] } }
+
   const runs = await prisma.payrollRun.findMany({
     orderBy: { period: 'desc' },
     include: { _count: { select: { payslips: true } } },
@@ -316,6 +443,8 @@ export async function getPayrollHistory() {
 }
 
 export async function getPayrollRun(id: number) {
+  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+
   const run = await prisma.payrollRun.findUnique({
     where: { id },
     include: {
@@ -338,10 +467,22 @@ export async function getPayrollRun(id: number) {
 }
 
 export async function getAllPayslips(period?: string) {
+  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied', data: [] } }
+
   const payslips = await prisma.payslip.findMany({
     where: period ? { payrollRun: { period } } : undefined,
     include: {
-      staff: { select: { name: true, role: true, designation: true } },
+      staff: {
+        select: {
+          name: true,
+          role: true,
+          designation: true,
+          panNumber: true,
+          uanNumber: true,
+          bankAccount: true,
+          bankName: true,
+        },
+      },
       payrollRun: { select: { period: true, status: true, displayId: true } },
     },
     orderBy: [{ payrollRun: { period: 'desc' } }, { staff: { name: 'asc' } }],
@@ -362,11 +503,55 @@ export async function approvePayroll(id: number) {
 
 export async function markPayrollPaid(id: number) {
   try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
-  const run = await prisma.payrollRun.findUnique({ where: { id }, select: { status: true } })
+  const run = await prisma.payrollRun.findUnique({
+    where: { id },
+    select: {
+      status: true,
+      period: true,
+      payslips: { select: { staffId: true, loanDeduction: true } },
+    },
+  })
   if (!run) return { success: false, error: 'Payroll run not found' }
   if (run.status !== 'APPROVED') return { success: false, error: 'Payroll must be APPROVED before marking as paid' }
 
-  await prisma.payrollRun.update({ where: { id }, data: { status: 'PAID', paidAt: new Date() } })
+  await prisma.$transaction(async (tx) => {
+    await tx.payrollRun.update({ where: { id }, data: { status: 'PAID', paidAt: new Date() } })
+
+    // Apply loan deductions only when payroll is actually paid.
+    for (const payslip of run.payslips) {
+      let pendingDeduction = payslip.loanDeduction || 0
+      if (pendingDeduction <= 0) continue
+
+      const loans = await tx.staffLoan.findMany({
+        where: {
+          staffId: payslip.staffId,
+          status: 'Active',
+          startPeriod: { lte: run.period },
+        },
+        orderBy: { createdAt: 'asc' },
+      })
+
+      for (const loan of loans) {
+        if (pendingDeduction <= 0) break
+
+        const scheduledInstallment = Math.min(loan.monthlyInstallment, loan.remainingAmount)
+        const applied = Math.min(scheduledInstallment, pendingDeduction)
+        if (applied <= 0) continue
+
+        const newRemaining = loan.remainingAmount - applied
+        await tx.staffLoan.update({
+          where: { id: loan.id },
+          data: {
+            remainingAmount: newRemaining,
+            status: newRemaining <= 0 ? 'Closed' : 'Active',
+          },
+        })
+
+        pendingDeduction -= applied
+      }
+    }
+  })
+
   revalidatePath('/payroll')
   return { success: true }
 }

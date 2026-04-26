@@ -1,8 +1,9 @@
 'use client';
 
-import { Bell, Search, Menu, ChevronDown, LogOut, User, Shield, MessageSquare, CalendarClock, AlertTriangle, Package, MapPin } from 'lucide-react';
+import { Bell, Search, Menu, ChevronDown, LogOut, User, Shield, MessageSquare, CalendarClock, AlertTriangle, Package, MapPin, FileText } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
+import { useRouter } from 'next/navigation';
 import { useSidebarContext } from './SidebarContext';
 import {
   getTopNotifications,
@@ -27,6 +28,7 @@ export default function TopBar() {
   });
   const { setSidebarOpen } = useSidebarContext();
   const { data: session } = useSession();
+  const router = useRouter();
   const menuRef = useRef(null);
   const notificationsRef = useRef(null);
 
@@ -43,8 +45,12 @@ export default function TopBar() {
   };
 
   useEffect(() => {
-    refreshNotifications();
-    const interval = setInterval(refreshNotifications, 60000);
+    const tick = () => {
+      refreshNotifications().catch(() => {});
+    };
+
+    queueMicrotask(tick);
+    const interval = setInterval(tick, 60000);
     return () => clearInterval(interval);
   }, []);
 
@@ -56,16 +62,16 @@ export default function TopBar() {
     }
   };
 
-  const formatTimeAgo = (dateStr) => {
-    const now = Date.now();
-    const then = new Date(dateStr).getTime();
-    const diffMin = Math.max(0, Math.round((now - then) / 60000));
-    if (diffMin < 1) return 'Just now';
-    if (diffMin < 60) return `${diffMin}m ago`;
-    const diffHr = Math.round(diffMin / 60);
-    if (diffHr < 24) return `${diffHr}h ago`;
-    const diffDay = Math.round(diffHr / 24);
-    return `${diffDay}d ago`;
+  const formatDateTime = (dateStr) => {
+    const date = new Date(dateStr);
+    if (Number.isNaN(date.getTime())) return '-';
+    return date.toLocaleString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
   };
 
   const getNotificationIcon = (type) => {
@@ -73,6 +79,7 @@ export default function TopBar() {
     if (type === 'followup') return CalendarClock;
     if (type === 'stock_alert') return Package;
     if (type === 'field_visit') return MapPin;
+    if (type === 'purchase_order') return FileText;
     return AlertTriangle;
   };
 
@@ -81,6 +88,7 @@ export default function TopBar() {
     if (type === 'followup') return 'text-accent bg-accent/10';
     if (type === 'stock_alert') return 'text-warning bg-warning/10';
     if (type === 'field_visit') return 'text-success bg-success/10';
+    if (type === 'purchase_order') return 'text-blue-600 bg-blue-500/10';
     return 'text-danger bg-danger/10';
   };
 
@@ -90,7 +98,7 @@ export default function TopBar() {
       if (!Number.isNaN(convoId)) {
         await markConversationNotificationRead(convoId);
       }
-    } else if (item.type === 'stock_alert' || item.type === 'field_visit') {
+    } else if (item.type === 'stock_alert' || item.type === 'field_visit' || item.type === 'purchase_order') {
       const notifId = Number(item.id.split('-')[1]);
       if (!Number.isNaN(notifId)) {
         await markNotificationRead(notifId);
@@ -99,7 +107,7 @@ export default function TopBar() {
 
     setShowNotifications(false);
     await refreshNotifications();
-    window.location.href = item.href;
+    router.push(item.href);
   };
 
   const handleMarkAllConversationsRead = async () => {
@@ -212,7 +220,7 @@ export default function TopBar() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between gap-2">
                               <p className="text-xs font-semibold text-foreground truncate">{item.title}</p>
-                              <span className="text-[10px] text-muted whitespace-nowrap">{formatTimeAgo(item.date)}</span>
+                              <span className="text-[10px] text-muted whitespace-nowrap">{formatDateTime(item.date)}</span>
                             </div>
                             <p className="text-[11px] text-muted truncate mt-0.5">{item.subtitle}</p>
                           </div>

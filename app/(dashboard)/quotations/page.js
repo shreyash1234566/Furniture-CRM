@@ -47,7 +47,18 @@ const createBlankItem = () => ({
   description: '',
   quantity: 1,
   rate: 0,
+  productImage: '',
   referenceImage: '',
+  imageSource: 'REFERENCE',
+})
+
+const createBlankBankDetails = () => ({
+  accountName: '',
+  bankName: '',
+  accountNumber: '',
+  ifscCode: '',
+  branchName: '',
+  upiId: '',
 })
 
 const createInitialForm = () => ({
@@ -65,6 +76,7 @@ const createInitialForm = () => ({
   freightCharge: 0,
   loadingCharge: 0,
   gstPercent: 18,
+  bankDetails: createBlankBankDetails(),
   notes: '',
   termsText: defaultTerms.join('\n'),
   items: [createBlankItem()],
@@ -83,15 +95,23 @@ function formatDateDisplay(dateValue) {
 
 function buildFormFromQuotation(quotation) {
   const mappedItems = Array.isArray(quotation?.items) && quotation.items.length > 0
-    ? quotation.items.map(item => ({
-        productId: item.productId || '',
-        name: item.name || '',
-        sku: item.sku || '',
-        description: item.description || '',
-        quantity: Number(item.quantity) || 1,
-        rate: Number(item.rate) || 0,
-        referenceImage: item.referenceImage || '',
-      }))
+    ? quotation.items.map(item => {
+        const productImage = item.productImage || ''
+        const savedImage = item.referenceImage || ''
+        const imageSource = productImage && savedImage && productImage === savedImage ? 'PRODUCT' : 'REFERENCE'
+
+        return {
+          productId: item.productId || '',
+          name: item.name || '',
+          sku: item.sku || '',
+          description: item.description || '',
+          quantity: Number(item.quantity) || 1,
+          rate: Number(item.rate) || 0,
+          productImage,
+          referenceImage: imageSource === 'REFERENCE' ? savedImage : '',
+          imageSource,
+        }
+      })
     : [createBlankItem()]
 
   return {
@@ -109,6 +129,14 @@ function buildFormFromQuotation(quotation) {
     freightCharge: Number(quotation?.freightCharge) || 0,
     loadingCharge: Number(quotation?.loadingCharge) || 0,
     gstPercent: Number(quotation?.gstPercent) || 18,
+    bankDetails: {
+      accountName: quotation?.bankDetails?.accountName || '',
+      bankName: quotation?.bankDetails?.bankName || '',
+      accountNumber: quotation?.bankDetails?.accountNumber || '',
+      ifscCode: quotation?.bankDetails?.ifscCode || '',
+      branchName: quotation?.bankDetails?.branchName || '',
+      upiId: quotation?.bankDetails?.upiId || '',
+    },
     notes: quotation?.notes || '',
     termsText: Array.isArray(quotation?.termsAndConditions) && quotation.termsAndConditions.length > 0
       ? quotation.termsAndConditions.join('\n')
@@ -119,6 +147,17 @@ function buildFormFromQuotation(quotation) {
 
 function formatCurrency(amount) {
   return `Rs. ${Number(amount || 0).toLocaleString('en-IN')}`
+}
+
+function getItemDisplayImage(item) {
+  const productImage = item?.productImage || ''
+  const referenceImage = item?.referenceImage || ''
+
+  if (item?.imageSource === 'PRODUCT') {
+    return productImage || referenceImage || ''
+  }
+
+  return referenceImage || productImage || ''
 }
 
 function computeTotals(items, installationPercent, freightCharge, loadingCharge, gstPercent) {
@@ -173,11 +212,21 @@ function buildPrintHtml(quotation, storeSettings) {
   const storeAddress = storeSettings?.address || ''
   const storePhone = storeSettings?.phone || ''
   const storeEmail = storeSettings?.email || ''
+  const bankRows = [
+    { label: 'Account Name', value: quotation?.bankDetails?.accountName },
+    { label: 'Bank Name', value: quotation?.bankDetails?.bankName },
+    { label: 'Account Number', value: quotation?.bankDetails?.accountNumber },
+    { label: 'IFSC Code', value: quotation?.bankDetails?.ifscCode },
+    { label: 'Branch', value: quotation?.bankDetails?.branchName },
+    { label: 'UPI ID', value: quotation?.bankDetails?.upiId },
+  ]
+  const populatedBankRows = bankRows.filter(row => String(row.value || '').trim())
 
   const itemRows = quotation.items
     .map((item, idx) => {
-      const img = item.referenceImage
-        ? `<img src="${escapeHtml(getAbsoluteImageUrl(item.referenceImage))}" alt="reference" style="width:110px;height:70px;object-fit:cover;border:1px solid #999;" />`
+      const displayImage = getItemDisplayImage(item)
+      const img = displayImage
+        ? `<img src="${escapeHtml(getAbsoluteImageUrl(displayImage))}" alt="item" style="width:110px;height:70px;object-fit:cover;border:1px solid #999;" />`
         : '<span style="color:#666;font-size:10px;">No image</span>'
 
       return `
@@ -255,16 +304,16 @@ function buildPrintHtml(quotation, storeSettings) {
               <td>${escapeHtml(formatDateDisplay(quotation.date))}</td>
             </tr>
             <tr>
-              <td style="font-weight:700;">MODE</td>
-              <td>${escapeHtml(quotation.deliveryMode || '-')}</td>
               <td style="font-weight:700;">ROAD PERMIT</td>
               <td>${escapeHtml(quotation.roadPermit || '-')}</td>
+              <td style="font-weight:700;">CONTACT PERSON</td>
+              <td>${escapeHtml(quotation.contactPerson || '-')}</td>
             </tr>
             <tr>
               <td style="font-weight:700;">EMAIL</td>
               <td>${escapeHtml(quotation.email || '-')}</td>
-              <td style="font-weight:700;">CONTACT PERSON</td>
-              <td>${escapeHtml(quotation.contactPerson || '-')}</td>
+              <td style="font-weight:700;">VALID UNTIL</td>
+              <td>${escapeHtml(formatDateDisplay(quotation.validUntil))}</td>
             </tr>
           </table>
 
@@ -273,7 +322,7 @@ function buildPrintHtml(quotation, storeSettings) {
               <tr>
                 <th class="blue" style="width:6%;">S.NO</th>
                 <th class="blue" style="width:42%;">PRODUCT DESCRIPTION</th>
-                <th class="blue" style="width:30%;">REFERENCE IMAGE</th>
+                <th class="blue" style="width:30%;">IMAGE</th>
                 <th class="blue" style="width:7%;">QTY.</th>
                 <th class="blue" style="width:7%;">RATE</th>
                 <th class="blue" style="width:8%;">AMOUNT</th>
@@ -286,7 +335,9 @@ function buildPrintHtml(quotation, storeSettings) {
 
           <table class="totals section">
             <tr class="bar"><td>TOTAL Rs.</td><td>${Number(quotation.subtotal || 0).toLocaleString('en-IN')}</td></tr>
-            <tr><td>INSTALLATION @${quotation.installationPercent || 0}%</td><td>${Number(quotation.installationCharge || 0).toLocaleString('en-IN')}</td></tr>
+            ${Number(quotation.installationPercent || 0) > 0
+              ? `<tr><td>INSTALLATION @${quotation.installationPercent || 0}%</td><td>${Number(quotation.installationCharge || 0).toLocaleString('en-IN')}</td></tr>`
+              : ''}
             <tr><td>FREIGHT CHARGES</td><td>${Number(quotation.freightCharge || 0).toLocaleString('en-IN')}</td></tr>
             <tr><td>LABOUR UNLOADING</td><td>${Number(quotation.loadingCharge || 0).toLocaleString('en-IN')}</td></tr>
             <tr class="bar"><td>GRAND TOTAL</td><td>${Number(quotation.totalBeforeTax || 0).toLocaleString('en-IN')}</td></tr>
@@ -302,7 +353,11 @@ function buildPrintHtml(quotation, storeSettings) {
           <div class="bank">
             <p><strong>Bank Details</strong></p>
             <p>Make Cheques in favor of <strong class="brand">${escapeHtml(storeName).toUpperCase()}</strong></p>
-            <p>For custom account details, please update from your internal finance records.</p>
+            ${populatedBankRows.length > 0
+              ? populatedBankRows
+                  .map(row => `<p>${escapeHtml(row.label)}: ${escapeHtml(row.value)}</p>`)
+                  .join('')
+              : '<p>No bank details provided for this quotation.</p>'}
           </div>
         </div>
       </body>
@@ -316,6 +371,14 @@ function QuotationSheetPreview({ quotation, storeSettings }) {
     ? quotation.termsAndConditions
     : defaultTerms
   const items = Array.isArray(quotation.items) ? quotation.items : []
+  const bankRows = [
+    { label: 'Account Name', value: quotation?.bankDetails?.accountName },
+    { label: 'Bank Name', value: quotation?.bankDetails?.bankName },
+    { label: 'Account Number', value: quotation?.bankDetails?.accountNumber },
+    { label: 'IFSC Code', value: quotation?.bankDetails?.ifscCode },
+    { label: 'Branch', value: quotation?.bankDetails?.branchName },
+    { label: 'UPI ID', value: quotation?.bankDetails?.upiId },
+  ].filter(row => String(row.value || '').trim())
 
   return (
     <div className="bg-white text-black border-[3px] border-black rounded-sm overflow-hidden text-[10px]">
@@ -346,16 +409,16 @@ function QuotationSheetPreview({ quotation, storeSettings }) {
             <td className="border border-black p-1">{formatDateDisplay(quotation.date)}</td>
           </tr>
           <tr>
-            <td className="border border-black p-1 font-semibold">MODE</td>
-            <td className="border border-black p-1">{quotation.deliveryMode || '-'}</td>
             <td className="border border-black p-1 font-semibold">ROAD PERMIT</td>
             <td className="border border-black p-1">{quotation.roadPermit || '-'}</td>
+            <td className="border border-black p-1 font-semibold">CONTACT PERSON</td>
+            <td className="border border-black p-1">{quotation.contactPerson || '-'}</td>
           </tr>
           <tr>
             <td className="border border-black p-1 font-semibold">EMAIL</td>
             <td className="border border-black p-1">{quotation.email || '-'}</td>
-            <td className="border border-black p-1 font-semibold">CONTACT PERSON</td>
-            <td className="border border-black p-1">{quotation.contactPerson || '-'}</td>
+            <td className="border border-black p-1 font-semibold">VALID UNTIL</td>
+            <td className="border border-black p-1">{formatDateDisplay(quotation.validUntil)}</td>
           </tr>
         </tbody>
       </table>
@@ -365,7 +428,7 @@ function QuotationSheetPreview({ quotation, storeSettings }) {
           <tr>
             <th className="border border-black bg-[#0ea5d8] text-white font-bold p-1 w-[6%]">S.NO</th>
             <th className="border border-black bg-[#0ea5d8] text-white font-bold p-1 w-[42%]">PRODUCT DISCRIPTION</th>
-            <th className="border border-black bg-[#0ea5d8] text-white font-bold p-1 w-[30%]">REFERENCE IMAGE</th>
+            <th className="border border-black bg-[#0ea5d8] text-white font-bold p-1 w-[30%]">IMAGE</th>
             <th className="border border-black bg-[#0ea5d8] text-white font-bold p-1 w-[7%]">QTY.</th>
             <th className="border border-black bg-[#0ea5d8] text-white font-bold p-1 w-[7%]">RATE</th>
             <th className="border border-black bg-[#0ea5d8] text-white font-bold p-1 w-[8%]">AMOUNT</th>
@@ -380,10 +443,10 @@ function QuotationSheetPreview({ quotation, storeSettings }) {
                 {item.description && <p className="whitespace-pre-wrap">{item.description}</p>}
               </td>
               <td className="border border-black p-1 align-top text-center">
-                {item.referenceImage ? (
+                {getItemDisplayImage(item) ? (
                   <Image
-                    src={item.referenceImage}
-                    alt="reference"
+                    src={getItemDisplayImage(item)}
+                    alt="item"
                     width={96}
                     height={64}
                     unoptimized
@@ -407,10 +470,12 @@ function QuotationSheetPreview({ quotation, storeSettings }) {
             <td className="border border-black p-1 text-right font-semibold bg-[#0ea5d8] text-white">TOTAL Rs.</td>
             <td className="border border-black p-1 text-right w-[28%] bg-[#0ea5d8] text-white font-semibold">{toINR(quotation.subtotal)}</td>
           </tr>
-          <tr>
-            <td className="border border-black p-1 text-right font-semibold">INSTALLATION @{Number(quotation.installationPercent || 0)}%</td>
-            <td className="border border-black p-1 text-right">{toINR(quotation.installationCharge)}</td>
-          </tr>
+          {Number(quotation.installationPercent || 0) > 0 && (
+            <tr>
+              <td className="border border-black p-1 text-right font-semibold">INSTALLATION @{Number(quotation.installationPercent || 0)}%</td>
+              <td className="border border-black p-1 text-right">{toINR(quotation.installationCharge)}</td>
+            </tr>
+          )}
           <tr>
             <td className="border border-black p-1 text-right font-semibold">FREIGHT CHARGES</td>
             <td className="border border-black p-1 text-right">{toINR(quotation.freightCharge)}</td>
@@ -447,7 +512,15 @@ function QuotationSheetPreview({ quotation, storeSettings }) {
 
       <div className="px-2 pb-2 text-[10px] text-[#6b4d8e]">
         <p>Make Cheques in Favor of <span className="text-[#06a9d6] font-bold">{(storeSettings?.storeName || 'Furniture Store').toUpperCase()}</span>.</p>
-        <p>Please Deposit The Entered Amount In Our Following Account</p>
+        {bankRows.length > 0 ? (
+          <div className="mt-1 space-y-0.5">
+            {bankRows.map(row => (
+              <p key={row.label}>{row.label}: {row.value}</p>
+            ))}
+          </div>
+        ) : (
+          <p>No bank details provided for this quotation.</p>
+        )}
       </div>
     </div>
   )
@@ -519,6 +592,7 @@ export default function QuotationsPage() {
       gstPercent: Number(form.gstPercent) || 0,
       gstAmount: computed.gstAmount,
       grandTotal: computed.grandTotal,
+      bankDetails: form.bankDetails,
       termsAndConditions: termsAndConditions.length > 0 ? termsAndConditions : defaultTerms,
     }
   }, [form, computed])
@@ -557,6 +631,16 @@ export default function QuotationsPage() {
     }))
   }
 
+  const updateBankDetails = patch => {
+    setForm(prev => ({
+      ...prev,
+      bankDetails: {
+        ...(prev.bankDetails || createBlankBankDetails()),
+        ...patch,
+      },
+    }))
+  }
+
   const addItem = () => {
     setForm(prev => ({ ...prev, items: [...prev.items, createBlankItem()] }))
   }
@@ -573,7 +657,15 @@ export default function QuotationsPage() {
     const product = products.find(p => p.id === productId)
 
     if (!product) {
-      updateItem(index, { productId: '', name: '', sku: '', rate: 0, description: '' })
+      updateItem(index, {
+        productId: '',
+        name: '',
+        sku: '',
+        rate: 0,
+        description: '',
+        productImage: '',
+        imageSource: 'REFERENCE',
+      })
       return
     }
 
@@ -583,6 +675,8 @@ export default function QuotationsPage() {
       sku: product.sku,
       description: product.description || '',
       rate: product.price,
+      productImage: product.image || '',
+      imageSource: product.image ? 'PRODUCT' : 'REFERENCE',
     })
   }
 
@@ -604,7 +698,7 @@ export default function QuotationsPage() {
       const data = await response.json()
 
       if (data.success && data.urls?.[0]) {
-        updateItem(index, { referenceImage: data.urls[0] })
+        updateItem(index, { referenceImage: data.urls[0], imageSource: 'REFERENCE' })
       } else {
         alert(data.error || 'Image upload failed')
       }
@@ -644,6 +738,14 @@ export default function QuotationsPage() {
       freightCharge: Number(form.freightCharge) || 0,
       loadingCharge: Number(form.loadingCharge) || 0,
       gstPercent: Number(form.gstPercent) || 0,
+      bankDetails: {
+        accountName: (form.bankDetails?.accountName || '').trim(),
+        bankName: (form.bankDetails?.bankName || '').trim(),
+        accountNumber: (form.bankDetails?.accountNumber || '').trim(),
+        ifscCode: (form.bankDetails?.ifscCode || '').trim(),
+        branchName: (form.bankDetails?.branchName || '').trim(),
+        upiId: (form.bankDetails?.upiId || '').trim(),
+      },
       notes: form.notes.trim(),
       termsAndConditions,
       items: computed.normalizedItems.map(item => ({
@@ -653,7 +755,7 @@ export default function QuotationsPage() {
         description: item.description?.trim(),
         quantity: Number(item.quantity) || 1,
         rate: Number(item.rate) || 0,
-        referenceImage: item.referenceImage || undefined,
+        referenceImage: getItemDisplayImage(item) || undefined,
       })),
     }
 
@@ -945,20 +1047,70 @@ export default function QuotationsPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-muted mb-1.5">Delivery Mode</label>
-                  <input
-                    value={form.deliveryMode}
-                    onChange={e => setForm(prev => ({ ...prev, deliveryMode: e.target.value }))}
-                    className="w-full px-3 py-2.5 rounded-xl text-sm"
-                  />
-                </div>
-                <div>
                   <label className="block text-xs font-medium text-muted mb-1.5">Road Permit</label>
                   <input
                     value={form.roadPermit}
                     onChange={e => setForm(prev => ({ ...prev, roadPermit: e.target.value }))}
                     className="w-full px-3 py-2.5 rounded-xl text-sm"
                   />
+                </div>
+              </div>
+
+              <div className="space-y-3 rounded-xl border border-border bg-surface p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-foreground">Bank Details</h3>
+                  <p className="text-[11px] text-muted">These details are printed on the quotation and can be updated per quote.</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-muted mb-1.5">Account Name</label>
+                    <input
+                      value={form.bankDetails?.accountName || ''}
+                      onChange={e => updateBankDetails({ accountName: e.target.value })}
+                      className="w-full px-3 py-2.5 rounded-xl text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted mb-1.5">Bank Name</label>
+                    <input
+                      value={form.bankDetails?.bankName || ''}
+                      onChange={e => updateBankDetails({ bankName: e.target.value })}
+                      className="w-full px-3 py-2.5 rounded-xl text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted mb-1.5">Account Number</label>
+                    <input
+                      value={form.bankDetails?.accountNumber || ''}
+                      onChange={e => updateBankDetails({ accountNumber: e.target.value })}
+                      className="w-full px-3 py-2.5 rounded-xl text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted mb-1.5">IFSC Code</label>
+                    <input
+                      value={form.bankDetails?.ifscCode || ''}
+                      onChange={e => updateBankDetails({ ifscCode: e.target.value.toUpperCase() })}
+                      className="w-full px-3 py-2.5 rounded-xl text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted mb-1.5">Branch Name</label>
+                    <input
+                      value={form.bankDetails?.branchName || ''}
+                      onChange={e => updateBankDetails({ branchName: e.target.value })}
+                      className="w-full px-3 py-2.5 rounded-xl text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted mb-1.5">UPI ID</label>
+                    <input
+                      value={form.bankDetails?.upiId || ''}
+                      onChange={e => updateBankDetails({ upiId: e.target.value })}
+                      className="w-full px-3 py-2.5 rounded-xl text-sm"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -976,6 +1128,7 @@ export default function QuotationsPage() {
 
                 {form.items.map((item, index) => {
                   const amount = (Number(item.quantity) || 0) * (Number(item.rate) || 0)
+                  const selectedImage = getItemDisplayImage(item)
 
                   return (
                     <div key={index} className="bg-surface border border-border rounded-xl p-3 space-y-2">
@@ -1064,6 +1217,31 @@ export default function QuotationsPage() {
                               />
                             )}
                           </div>
+
+                          <label className="block text-[11px] text-muted mt-2 mb-1">Image Used In Quotation</label>
+                          <select
+                            value={item.imageSource || 'REFERENCE'}
+                            onChange={e => updateItem(index, { imageSource: e.target.value })}
+                            className="w-full px-2 py-2 rounded-lg text-xs"
+                          >
+                            <option value="PRODUCT" disabled={!item.productImage}>Product Image</option>
+                            <option value="REFERENCE">Reference Upload</option>
+                          </select>
+
+                          <div className="mt-2">
+                            {selectedImage ? (
+                              <Image
+                                src={selectedImage}
+                                alt="selected item"
+                                width={120}
+                                height={80}
+                                unoptimized
+                                className="w-[120px] h-20 rounded border border-border object-cover"
+                              />
+                            ) : (
+                              <p className="text-[11px] text-muted">No image selected</p>
+                            )}
+                          </div>
                         </div>
                       </div>
 
@@ -1083,48 +1261,89 @@ export default function QuotationsPage() {
                 })}
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-muted mb-1.5">Installation %</label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={form.installationPercent}
-                    onChange={e => setForm(prev => ({ ...prev, installationPercent: parseFloat(e.target.value || '0') }))}
-                    className="w-full px-3 py-2.5 rounded-xl text-sm"
-                  />
+              <div className="space-y-3 rounded-xl border border-border bg-surface p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-foreground">Charges & Tax</h3>
+                  <p className="text-[11px] text-muted">Installation charge is calculated automatically from subtotal.</p>
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-muted mb-1.5">Freight</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={form.freightCharge}
-                    onChange={e => setForm(prev => ({ ...prev, freightCharge: parseInt(e.target.value || '0') }))}
-                    className="w-full px-3 py-2.5 rounded-xl text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-muted mb-1.5">Loading</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={form.loadingCharge}
-                    onChange={e => setForm(prev => ({ ...prev, loadingCharge: parseInt(e.target.value || '0') }))}
-                    className="w-full px-3 py-2.5 rounded-xl text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-muted mb-1.5">GST %</label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={form.gstPercent}
-                    onChange={e => setForm(prev => ({ ...prev, gstPercent: parseFloat(e.target.value || '0') }))}
-                    className="w-full px-3 py-2.5 rounded-xl text-sm"
-                  />
+
+                <div className="grid grid-cols-1 xl:grid-cols-5 gap-3">
+                  <div className="xl:col-span-2 min-w-0 rounded-xl border border-border/70 bg-background/40 p-3 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label className="block text-xs font-medium text-muted">Installation %</label>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setForm(prev => ({ ...prev, installationPercent: 5 }))}
+                          className="px-2 py-1 rounded-lg border border-border text-[11px] font-medium text-muted hover:text-accent hover:border-accent/40 whitespace-nowrap"
+                        >
+                          Set 5%
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setForm(prev => ({ ...prev, installationPercent: 0 }))}
+                          className="px-2 py-1 rounded-lg border border-border text-[11px] font-medium text-muted hover:text-red-600 hover:border-red-300 whitespace-nowrap"
+                        >
+                          Set 0%
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="relative max-w-[180px]">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={form.installationPercent}
+                        onChange={e => setForm(prev => ({ ...prev, installationPercent: parseFloat(e.target.value || '0') }))}
+                        className="w-full px-3 pr-8 py-2.5 rounded-xl text-sm"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted">%</span>
+                    </div>
+
+                    <p className="text-[11px] text-muted">
+                      Current charge: <span className="font-semibold text-foreground">{formatCurrency(computed.installationCharge)}</span>
+                    </p>
+                  </div>
+
+                  <div className="xl:col-span-3 min-w-0 grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="min-w-0">
+                      <label className="block text-xs font-medium text-muted mb-1.5">Freight</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={form.freightCharge}
+                        onChange={e => setForm(prev => ({ ...prev, freightCharge: parseInt(e.target.value || '0') }))}
+                        className="w-full px-3 py-2.5 rounded-xl text-sm"
+                      />
+                    </div>
+
+                    <div className="min-w-0">
+                      <label className="block text-xs font-medium text-muted mb-1.5">Loading</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={form.loadingCharge}
+                        onChange={e => setForm(prev => ({ ...prev, loadingCharge: parseInt(e.target.value || '0') }))}
+                        className="w-full px-3 py-2.5 rounded-xl text-sm"
+                      />
+                    </div>
+
+                    <div className="min-w-0">
+                      <label className="block text-xs font-medium text-muted mb-1.5">GST %</label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={form.gstPercent}
+                          onChange={e => setForm(prev => ({ ...prev, gstPercent: parseFloat(e.target.value || '0') }))}
+                          className="w-full px-3 pr-8 py-2.5 rounded-xl text-sm"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted">%</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 

@@ -132,6 +132,74 @@ export default function GSTPage() {
     URL.revokeObjectURL(url)
   }
 
+  const sanitizeSheetName = (name) => {
+    const cleaned = String(name || 'Sheet1').replace(/[\\/*?:\[\]]/g, '_')
+    return cleaned.slice(0, 31) || 'Sheet1'
+  }
+
+  const flattenRow = (value, prefix = '') => {
+    if (value === null || value === undefined) return { [prefix || 'value']: '' }
+    if (Array.isArray(value)) return { [prefix || 'value']: JSON.stringify(value) }
+    if (typeof value !== 'object') return { [prefix || 'value']: value }
+
+    const out = {}
+    Object.entries(value).forEach(([key, nested]) => {
+      const path = prefix ? `${prefix}.${key}` : key
+      if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+        Object.assign(out, flattenRow(nested, path))
+      } else if (Array.isArray(nested)) {
+        out[path] = JSON.stringify(nested)
+      } else {
+        out[path] = nested
+      }
+    })
+    return out
+  }
+
+  const buildExcelSheets = (payload) => {
+    const sheets = [{ name: 'SUMMARY', rows: [flattenRow(payload)] }]
+
+    Object.entries(payload || {}).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        if (value.length === 0) return
+        const rows = value.map(item => (
+          item && typeof item === 'object' ? flattenRow(item) : { value: item }
+        ))
+        sheets.push({ name: key.toUpperCase(), rows })
+        return
+      }
+
+      if (value && typeof value === 'object') {
+        const hasNestedArrays = Object.values(value).some(v => Array.isArray(v))
+        if (!hasNestedArrays) {
+          sheets.push({ name: key.toUpperCase(), rows: [flattenRow(value)] })
+        }
+      }
+    })
+
+    return sheets
+  }
+
+  const handleExportExcel = async (ret) => {
+    try {
+      const payload = typeof ret.data === 'string' ? JSON.parse(ret.data) : ret.data
+      const XLSX = await import('xlsx')
+      const workbook = XLSX.utils.book_new()
+
+      const sheets = buildExcelSheets(payload)
+      sheets.forEach(sheet => {
+        const rows = sheet.rows.length > 0 ? sheet.rows : [{}]
+        const worksheet = XLSX.utils.json_to_sheet(rows)
+        XLSX.utils.book_append_sheet(workbook, worksheet, sanitizeSheetName(sheet.name))
+      })
+
+      XLSX.writeFile(workbook, `${ret.returnType}_${ret.period}.xlsx`)
+    } catch (error) {
+      console.error(error)
+      alert('Failed to export Excel file')
+    }
+  }
+
   const tabs = [
     { id: 'gstr1', label: 'GSTR-1', icon: ArrowUpRight },
     { id: 'gstr2', label: 'GSTR-2', icon: ArrowDownLeft },
@@ -747,10 +815,16 @@ export default function GSTPage() {
             </div>
             {generatedData && (
               <div className="pt-5">
-                <button onClick={() => handleExportJSON(generatedData)}
-                  className="px-4 py-2 bg-surface border border-border text-foreground rounded-lg text-sm font-medium hover:bg-surface-hover flex items-center gap-2">
-                  <Download className="w-4 h-4" /> Export JSON
-                </button>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => handleExportJSON(generatedData)}
+                    className="px-4 py-2 bg-surface border border-border text-foreground rounded-lg text-sm font-medium hover:bg-surface-hover flex items-center gap-2">
+                    <Download className="w-4 h-4" /> Export JSON
+                  </button>
+                  <button onClick={() => handleExportExcel(generatedData)}
+                    className="px-4 py-2 bg-surface border border-border text-foreground rounded-lg text-sm font-medium hover:bg-surface-hover flex items-center gap-2">
+                    <Download className="w-4 h-4" /> Export Excel
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -788,10 +862,16 @@ export default function GSTPage() {
             </div>
             {generatedData && (
               <div className="pt-5">
-                <button onClick={() => handleExportJSON(generatedData)}
-                  className="px-4 py-2 bg-surface border border-border text-foreground rounded-lg text-sm font-medium hover:bg-surface-hover flex items-center gap-2">
-                  <Download className="w-4 h-4" /> Export JSON
-                </button>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => handleExportJSON(generatedData)}
+                    className="px-4 py-2 bg-surface border border-border text-foreground rounded-lg text-sm font-medium hover:bg-surface-hover flex items-center gap-2">
+                    <Download className="w-4 h-4" /> Export JSON
+                  </button>
+                  <button onClick={() => handleExportExcel(generatedData)}
+                    className="px-4 py-2 bg-surface border border-border text-foreground rounded-lg text-sm font-medium hover:bg-surface-hover flex items-center gap-2">
+                    <Download className="w-4 h-4" /> Export Excel
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -893,6 +973,10 @@ export default function GSTPage() {
                     <button onClick={() => handleExportJSON(r)}
                       className="px-3 py-1 bg-surface border border-border text-muted rounded-lg text-xs hover:bg-surface-hover flex items-center gap-1">
                       <Download className="w-3 h-3" /> JSON
+                    </button>
+                    <button onClick={() => handleExportExcel(r)}
+                      className="px-3 py-1 bg-surface border border-border text-muted rounded-lg text-xs hover:bg-surface-hover flex items-center gap-1">
+                      <Download className="w-3 h-3" /> Excel
                     </button>
                   </td>
                 </tr>

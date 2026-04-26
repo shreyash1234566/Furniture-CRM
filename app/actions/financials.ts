@@ -232,8 +232,8 @@ export async function getBalanceSheet(asOfDate: string) {
   const staffLoanAsset = staffLoans._sum.remainingAmount || 0
   const itcAsset = gstInputPOs._sum.gst || 0
 
-  const totalCurrentAssets = cashAndBank + accountsReceivable + inventoryValue
-  const totalAssets = totalCurrentAssets + staffLoanAsset + itcAsset
+  const totalCurrentAssets = cashAndBank + accountsReceivable + inventoryValue + itcAsset + staffLoanAsset
+  const totalAssets = totalCurrentAssets
 
   const accountsPayable = poPayables._sum.balanceDue || 0
   const gstOutput = gstOutputInvoices._sum.gst || 0
@@ -299,9 +299,9 @@ export async function getCashFlow(fromDate: string, toDate: string) {
     }),
     // Outflow: credit note refunds
     prisma.creditNote.aggregate({ where: { date: { gte: from, lte: to } }, _sum: { amount: true } }),
-    // Inflow: staff loan repayments (from payroll deductions)
+    // Inflow: staff loan repayments recognized only when payroll is actually paid.
     prisma.payslip.aggregate({
-      where: { payrollRun: { status: { in: ['APPROVED', 'PAID'] }, period: { gte: fromDate.substring(0, 7), lte: toDate.substring(0, 7) } } },
+      where: { payrollRun: { status: 'PAID', paidAt: { gte: from, lte: to } } },
       _sum: { loanDeduction: true },
     }),
   ])
@@ -507,7 +507,10 @@ export async function getPayablesAging() {
 export async function getJournalEntries(fromDate?: string, toDate?: string) {
   const where: Record<string, unknown> = {}
   if (fromDate && toDate) {
-    where.date = { gte: new Date(fromDate), lte: new Date(toDate) }
+    const from = new Date(fromDate)
+    const to = new Date(toDate)
+    to.setHours(23, 59, 59, 999)
+    where.date = { gte: from, lte: to }
   }
 
   const entries = await prisma.journalEntry.findMany({

@@ -26,8 +26,6 @@ const moreItems = [
   { href: '/marketing', label: 'Marketing', roles: ['ADMIN', 'MANAGER'] },
   { href: '/conversations', label: 'Conversations' },
   { href: '/calls', label: 'Call Center' },
-  { href: '/reviews', label: 'Reviews' },
-  { href: '/recommend', label: 'AI Recommend' },
   { href: '/settings', label: 'Settings', roles: ['ADMIN'] },
 ];
 

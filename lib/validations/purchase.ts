@@ -26,6 +26,9 @@ export const createPurchaseOrderSchema = z.object({
   expectedDate: z.string().optional(),
   notes: z.string().optional(),
   discount: z.number().min(0).default(0),
+  isRCM: z.boolean().default(false),
+  itcEligible: z.boolean().default(true),
+  itcCategory: z.enum(['INPUTS', 'SERVICES', 'CAPITAL_GOODS', 'INELIGIBLE']).default('INPUTS'),
   items: z.array(poItemSchema).min(1, 'At least one item required'),
 })
 

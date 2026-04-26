@@ -8,6 +8,7 @@ const publicPaths = ['/login', '/api/auth', '/api/webhooks', '/walkin-form', '/a
 const routePermissions: Record<string, string[]> = {
   '/settings': ['ADMIN'],
   '/staff': ['ADMIN', 'MANAGER'],
+  '/payroll': ['ADMIN', 'MANAGER'],
   '/billing': ['ADMIN', 'MANAGER'],
   '/drafts': ['ADMIN', 'MANAGER'],
   '/marketing': ['ADMIN', 'MANAGER'],

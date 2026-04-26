@@ -328,7 +328,7 @@ export default function ExpensesPage() {
           {/* Quick-add inline */}
           <div className="glass-card p-4">
             <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
-              <Plus className="w-4 h-4 text-accent" /> Quick Add Today's Expense
+              <Plus className="w-4 h-4 text-accent" /> Quick Add Today&apos;s Expense
             </h3>
             <div className="flex flex-wrap gap-2">
               <select value={expForm.categoryId} onChange={e => setExpForm(f => ({ ...f, categoryId: e.target.value }))}
@@ -364,7 +364,7 @@ export default function ExpensesPage() {
             <div className="glass-card py-16 text-center text-muted">
               <Receipt className="w-12 h-12 mx-auto mb-3 opacity-20" />
               <p className="font-medium">No expenses recorded today</p>
-              <p className="text-sm mt-1">Add your first expense above or click "Add Expense"</p>
+              <p className="text-sm mt-1">Add your first expense above or click &quot;Add Expense&quot;</p>
             </div>
           ) : (
             <div className="glass-card overflow-hidden">
@@ -907,12 +907,19 @@ export default function ExpensesPage() {
                       className="p-1.5 text-muted hover:text-accent rounded-lg hover:bg-surface transition-colors" title="Edit budget">
                       <Edit3 className="w-3.5 h-3.5" />
                     </button>
-                    {!cat.isDefault && (
-                      <button onClick={async () => { if (confirm(`Delete "${cat.name}"?`)) { await deleteExpenseCategory(cat.id); await loadData(); } }}
-                        className="p-1.5 text-muted hover:text-red-600 rounded-lg hover:bg-surface transition-colors">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+                    <button
+                      onClick={async () => {
+                        const actionLabel = cat._count.expenses > 0 || cat.isDefault ? 'archive' : 'delete'
+                        if (confirm(`Are you sure you want to ${actionLabel} "${cat.name}"?`)) {
+                          await deleteExpenseCategory(cat.id)
+                          await loadData()
+                        }
+                      }}
+                      className="p-1.5 text-muted hover:text-red-600 rounded-lg hover:bg-surface transition-colors"
+                      title={cat._count.expenses > 0 || cat.isDefault ? 'Archive category' : 'Delete category'}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
                 <div className="flex items-center justify-between text-xs text-muted mt-2 pt-2 border-t border-border">
@@ -1092,7 +1099,7 @@ export default function ExpensesPage() {
       {/* ═══════ EDIT BUDGET MODAL ═══════ */}
       <Modal isOpen={!!showBudgetEdit} onClose={() => setShowBudgetEdit(null)} title="Set Monthly Budget">
         <div className="space-y-4">
-          <p className="text-sm text-muted">Set the monthly budget limit for this category. You'll see alerts when spending exceeds the budget.</p>
+          <p className="text-sm text-muted">Set the monthly budget limit for this category. You&apos;ll see alerts when spending exceeds the budget.</p>
           <div>
             <label className="block text-xs font-medium text-muted mb-1.5">Monthly Budget (₹)</label>
             <input type="number" min="0" value={budgetVal} onChange={e => setBudgetVal(parseInt(e.target.value) || 0)}

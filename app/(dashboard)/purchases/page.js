@@ -3,12 +3,13 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
   Search, Plus, Truck, Users, RotateCcw, CheckCircle, XCircle,
-  Package, Eye, FileText, ArrowDownCircle, Clock, AlertTriangle
+  Eye, FileText, ArrowDownCircle, Clock, AlertTriangle
 } from 'lucide-react'
 import {
-  getSuppliers, createSupplier, getPurchaseOrders, createPurchaseOrder,
+  getSuppliers, createSupplier, updateSupplier, getPurchaseOrders, createPurchaseOrder,
   approvePurchaseOrder, receivePurchaseOrder, cancelPurchaseOrder,
-  getPurchaseReturns, createPurchaseReturn, getPurchaseStats
+  getPurchaseReturns, createPurchaseReturn, getPurchaseStats, recordPurchaseOrderPayment,
+  sendPurchaseOrderToSupplier, updatePurchaseOrder
 } from '@/app/actions/purchases'
 import { getProducts } from '@/app/actions/products'
 import Modal from '@/components/Modal'
@@ -20,6 +21,29 @@ const poStatusColors = {
   RECEIVED: 'bg-emerald-500/10 text-emerald-400',
   CANCELLED: 'bg-red-500/10 text-red-400',
 }
+
+const ITC_CATEGORIES = ['INPUTS', 'SERVICES', 'CAPITAL_GOODS', 'INELIGIBLE']
+
+const createEmptyPOForm = () => ({
+  supplierId: '',
+  expectedDate: '',
+  discount: 0,
+  isRCM: false,
+  itcEligible: true,
+  itcCategory: 'INPUTS',
+  notes: '',
+  items: [{ productId: '', quantity: 1, unitCost: 0, gstRate: 18 }],
+})
+
+const createEmptySupplierForm = () => ({
+  name: '',
+  phone: '',
+  email: '',
+  gstNumber: '',
+  address: '',
+  contactPerson: '',
+  paymentTerms: 30,
+})
 
 export default function PurchasesPage() {
   const [tab, setTab] = useState('orders')
@@ -37,13 +61,17 @@ export default function PurchasesPage() {
   const [showPOModal, setShowPOModal] = useState(false)
   const [showReturnModal, setShowReturnModal] = useState(false)
   const [showDetailModal, setShowDetailModal] = useState(false)
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [selectedPO, setSelectedPO] = useState(null)
+  const [editingSupplierId, setEditingSupplierId] = useState(null)
+  const [editingPOId, setEditingPOId] = useState(null)
   const [submitting, setSubmitting] = useState(false)
 
   // Forms
-  const [supplierForm, setSupplierForm] = useState({ name: '', phone: '', email: '', gstNumber: '', address: '', contactPerson: '', paymentTerms: 30 })
-  const [poForm, setPOForm] = useState({ supplierId: '', notes: '', items: [{ productId: '', quantity: 1, unitCost: 0 }] })
+  const [supplierForm, setSupplierForm] = useState(createEmptySupplierForm())
+  const [poForm, setPOForm] = useState(createEmptyPOForm())
   const [returnForm, setReturnForm] = useState({ poId: '', supplierId: '', reason: '', notes: '', items: [{ productId: '', quantity: 1, unitCost: 0 }] })
+  const [paymentForm, setPaymentForm] = useState({ poId: '', amount: '', note: '' })
 
   const loadData = () => {
     setLoading(true)
@@ -58,6 +86,7 @@ export default function PurchasesPage() {
       })
   }
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { loadData() }, [])
 
   const filteredOrders = useMemo(() => orders.filter(o =>
@@ -72,27 +101,141 @@ export default function PurchasesPage() {
     s.gstNumber?.toLowerCase().includes(search.toLowerCase())
   ), [suppliers, search])
 
-  const handleCreateSupplier = async () => {
+  const poPreview = useMemo(() => {
+    const rows = poForm.items
+      .filter(item => item.productId)
+      .map(item => {
+        const quantity = Math.max(1, Number(item.quantity) || 1)
+        const unitCost = Math.max(0, Number(item.unitCost) || 0)
+        const gstRate = Math.max(0, Number(item.gstRate) || 18)
+        return { amount: quantity * unitCost, gstRate }
+      })
+
+    const subtotal = rows.reduce((sum, row) => sum + row.amount, 0)
+    const discount = Math.min(subtotal, Math.max(0, Number(poForm.discount) || 0))
+    const taxable = Math.max(0, subtotal - discount)
+    const grossGst = rows.reduce((sum, row) => sum + Math.round(row.amount * row.gstRate / 100), 0)
+    const gst = Math.max(0, Math.round(grossGst * (subtotal > 0 ? taxable / subtotal : 1)))
+
+    return {
+      subtotal,
+      discount,
+      taxable,
+      gst,
+      total: taxable + gst,
+    }
+  }, [poForm.items, poForm.discount])
+
+  const resetSupplierForm = () => {
+    setEditingSupplierId(null)
+    setSupplierForm(createEmptySupplierForm())
+  }
+
+  const openCreateSupplierModal = () => {
+    resetSupplierForm()
+    setShowSupplierModal(true)
+  }
+
+  const openEditSupplierModal = (supplier) => {
+    setEditingSupplierId(supplier.id)
+    setSupplierForm({
+      name: supplier.name || '',
+      phone: supplier.phone || '',
+      email: supplier.email || '',
+      gstNumber: supplier.gstNumber || '',
+      address: supplier.address || '',
+      contactPerson: supplier.contactPerson || '',
+      paymentTerms: Number(supplier.paymentTerms || 0),
+    })
+    setShowSupplierModal(true)
+  }
+
+  const handleSaveSupplier = async () => {
     setSubmitting(true)
-    const res = await createSupplier({ ...supplierForm, paymentTerms: Number(supplierForm.paymentTerms) })
+    const payload = { ...supplierForm, paymentTerms: Number(supplierForm.paymentTerms) }
+    const res = editingSupplierId
+      ? await updateSupplier(editingSupplierId, payload)
+      : await createSupplier(payload)
+
     if (res.success) {
       setShowSupplierModal(false)
-      setSupplierForm({ name: '', phone: '', email: '', gstNumber: '', address: '', contactPerson: '', paymentTerms: 30 })
+      resetSupplierForm()
       loadData()
     } else alert(res.error)
     setSubmitting(false)
   }
 
+  const resetPOForm = () => {
+    setEditingPOId(null)
+    setPOForm(createEmptyPOForm())
+  }
+
+  const openCreatePOModal = () => {
+    resetPOForm()
+    setShowPOModal(true)
+  }
+
+  const handleEditPO = (po) => {
+    if (po.status !== 'DRAFT') {
+      alert('Only DRAFT purchase orders can be edited')
+      return
+    }
+
+    const editableItems = (po.items || []).map(item => ({
+      productId: String(item.productId || ''),
+      quantity: Number(item.quantity || 1),
+      unitCost: Number(item.unitCost || 0),
+      gstRate: Number(item.gstRate || 18),
+    }))
+
+    setEditingPOId(po.id)
+    setPOForm({
+      supplierId: String(po.supplierId || ''),
+      expectedDate: po.expectedDate ? new Date(po.expectedDate).toISOString().slice(0, 10) : '',
+      discount: Number(po.discount || 0),
+      isRCM: !!po.isRCM,
+      itcEligible: po.itcEligible !== false,
+      itcCategory: po.itcCategory || 'INPUTS',
+      notes: po.notes || '',
+      items: editableItems.length > 0 ? editableItems : createEmptyPOForm().items,
+    })
+    setShowDetailModal(false)
+    setShowPOModal(true)
+  }
+
   const handleCreatePO = async () => {
     setSubmitting(true)
+    const isEditMode = Boolean(editingPOId)
     const items = poForm.items.filter(i => i.productId).map(i => {
       const prod = products.find(p => p.id === Number(i.productId))
-      return { productId: Number(i.productId), name: prod?.name || '', sku: prod?.sku || '', hsnCode: prod?.hsnCode || '', quantity: Number(i.quantity), unitCost: Number(i.unitCost), gstRate: 18 }
+      return {
+        productId: Number(i.productId),
+        name: prod?.name || '',
+        sku: prod?.sku || '',
+        hsnCode: prod?.hsnCode || '',
+        quantity: Number(i.quantity),
+        unitCost: Number(i.unitCost),
+        gstRate: Number(i.gstRate) || 18,
+      }
     })
-    const res = await createPurchaseOrder({ supplierId: Number(poForm.supplierId), notes: poForm.notes, items })
+    const payload = {
+      supplierId: Number(poForm.supplierId),
+      expectedDate: poForm.expectedDate || undefined,
+      discount: Math.max(0, Number(poForm.discount) || 0),
+      isRCM: !!poForm.isRCM,
+      itcEligible: !!poForm.itcEligible,
+      itcCategory: poForm.itcCategory,
+      notes: poForm.notes,
+      items,
+    }
+
+    const res = isEditMode
+      ? await updatePurchaseOrder(editingPOId, payload)
+      : await createPurchaseOrder(payload)
+
     if (res.success) {
       setShowPOModal(false)
-      setPOForm({ supplierId: '', notes: '', items: [{ productId: '', quantity: 1, unitCost: 0 }] })
+      resetPOForm()
       loadData()
     } else alert(res.error)
     setSubmitting(false)
@@ -100,8 +243,11 @@ export default function PurchasesPage() {
 
   const handleApprovePO = async (id) => {
     const res = await approvePurchaseOrder(id)
-    if (res.success) loadData()
-    else alert(res.error)
+    if (res.success) {
+      if (res.warning) alert(res.warning)
+      if (res.message) alert(res.message)
+      loadData()
+    } else alert(res.error)
   }
 
   const handleReceivePO = async (id) => {
@@ -115,6 +261,40 @@ export default function PurchasesPage() {
     const res = await cancelPurchaseOrder(id)
     if (res.success) loadData()
     else alert(res.error)
+  }
+
+  const handleSendPOToSupplier = async (id) => {
+    const res = await sendPurchaseOrderToSupplier(id)
+    if (res.success) {
+      alert(res.message || 'Purchase order sent to supplier')
+      loadData()
+    } else {
+      alert(res.error || 'Unable to send purchase order to supplier')
+    }
+  }
+
+  const openPaymentModal = (po) => {
+    setPaymentForm({ poId: po.id, amount: String(po.balanceDue || ''), note: '' })
+    setShowPaymentModal(true)
+  }
+
+  const handleRecordPayment = async () => {
+    const amount = Number(paymentForm.amount)
+    if (!paymentForm.poId || !amount || amount <= 0) {
+      alert('Enter a valid payment amount')
+      return
+    }
+
+    setSubmitting(true)
+    const res = await recordPurchaseOrderPayment(Number(paymentForm.poId), amount, paymentForm.note)
+    if (res.success) {
+      setShowPaymentModal(false)
+      setPaymentForm({ poId: '', amount: '', note: '' })
+      loadData()
+    } else {
+      alert(res.error)
+    }
+    setSubmitting(false)
   }
 
   const handleCreateReturn = async () => {
@@ -138,7 +318,7 @@ export default function PurchasesPage() {
     setSubmitting(false)
   }
 
-  const addPOItem = () => setPOForm(f => ({ ...f, items: [...f.items, { productId: '', quantity: 1, unitCost: 0 }] }))
+  const addPOItem = () => setPOForm(f => ({ ...f, items: [...f.items, { productId: '', quantity: 1, unitCost: 0, gstRate: 18 }] }))
   const addReturnItem = () => setReturnForm(f => ({ ...f, items: [...f.items, { productId: '', quantity: 1, unitCost: 0 }] }))
 
   const tabs = [
@@ -158,20 +338,21 @@ export default function PurchasesPage() {
           <p className="text-muted text-sm mt-1">Manage suppliers, purchase orders & returns</p>
         </div>
         <div className="flex gap-2">
-          {tab === 'orders' && <button onClick={() => setShowPOModal(true)} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> New PO</button>}
-          {tab === 'suppliers' && <button onClick={() => setShowSupplierModal(true)} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Add Supplier</button>}
+          {tab === 'orders' && <button onClick={openCreatePOModal} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> New PO</button>}
+          {tab === 'suppliers' && <button onClick={openCreateSupplierModal} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Add Supplier</button>}
           {tab === 'returns' && <button onClick={() => setShowReturnModal(true)} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> New Return</button>}
         </div>
       </div>
 
       {/* Stats */}
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
           {[
             { label: 'Total POs', value: stats.totalPOs, icon: FileText, color: 'text-blue-400' },
-            { label: 'Total Spent', value: `₹${(stats.totalSpent || 0).toLocaleString('en-IN')}`, icon: Truck, color: 'text-emerald-400' },
-            { label: 'Pending', value: stats.pendingPOs, icon: Clock, color: 'text-amber-400' },
-            { label: 'Suppliers', value: stats.totalSuppliers, icon: Users, color: 'text-purple-400' },
+            { label: 'Open Payables', value: `₹${(stats.outstandingPayables || 0).toLocaleString('en-IN')}`, icon: Truck, color: 'text-emerald-400' },
+            { label: 'Pending Receipts', value: stats.pendingPOs, icon: Clock, color: 'text-amber-400' },
+            { label: 'Overdue POs', value: stats.overduePOs, icon: AlertTriangle, color: 'text-red-400' },
+            { label: 'Suppliers', value: stats.totalSuppliers || stats.suppliers, icon: Users, color: 'text-purple-400' },
           ].map((s, i) => (
             <div key={i} className="glass-card p-4">
               <div className="flex items-center gap-3">
@@ -214,27 +395,68 @@ export default function PurchasesPage() {
         <div className="glass-card overflow-hidden">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-border">
-              {['PO #', 'Supplier', 'Date', 'Items', 'Total', 'Paid', 'Balance', 'Status', 'Actions'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>)}
+              {['PO #', 'Supplier', 'Date', 'Expected', 'Items', 'Total', 'Paid', 'Balance', 'Compliance', 'Status', 'Actions'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>)}
             </tr></thead>
             <tbody>
               {filteredOrders.map(po => (
                 <tr key={po.id} className="border-b border-border/50 hover:bg-surface-hover transition-colors">
+                  {(() => {
+                    const isOverdue = po.expectedDate && ['DRAFT', 'APPROVED', 'PARTIALLY_RECEIVED'].includes(po.status) && new Date(po.expectedDate) < new Date()
+                    return (
+                      <>
                   <td className="px-4 py-3 font-medium text-foreground">{po.displayId}</td>
                   <td className="px-4 py-3 text-foreground">{po.supplier?.name}</td>
                   <td className="px-4 py-3 text-muted">{new Date(po.date).toLocaleDateString('en-IN')}</td>
+                  <td className={`px-4 py-3 text-xs ${isOverdue ? 'text-red-400 font-medium' : 'text-muted'}`}>
+                    {po.expectedDate ? new Date(po.expectedDate).toLocaleDateString('en-IN') : '—'}
+                  </td>
                   <td className="px-4 py-3 text-muted">{po.items?.length || 0}</td>
                   <td className="px-4 py-3 font-medium text-foreground">₹{po.total?.toLocaleString('en-IN')}</td>
                   <td className="px-4 py-3 text-emerald-400">₹{po.amountPaid?.toLocaleString('en-IN')}</td>
                   <td className="px-4 py-3 text-amber-400">₹{po.balanceDue?.toLocaleString('en-IN')}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-col gap-1">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium w-fit ${po.itcEligible ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                        {po.itcEligible ? `ITC: ${po.itcCategory?.replace(/_/g, ' ') || 'INPUTS'}` : 'ITC: Ineligible'}
+                      </span>
+                      {po.isRCM && <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/10 text-amber-400 w-fit">RCM</span>}
+                    </div>
+                  </td>
                   <td className="px-4 py-3"><span className={`px-2 py-1 rounded-full text-xs font-medium ${poStatusColors[po.status] || ''}`}>{po.status?.replace(/_/g, ' ')}</span></td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
                       <button onClick={() => { setSelectedPO(po); setShowDetailModal(true) }} className="p-1.5 rounded-lg hover:bg-surface-hover text-muted hover:text-foreground" title="View"><Eye className="w-4 h-4" /></button>
+                      {po.status === 'DRAFT' && (
+                        <button
+                          onClick={() => handleEditPO(po)}
+                          className="px-2.5 py-1 rounded-lg border border-border text-xs font-medium text-muted hover:text-accent hover:border-accent/40"
+                          title="Edit PO"
+                        >
+                          Edit
+                        </button>
+                      )}
+                      {po.status !== 'CANCELLED' && (
+                        <button
+                          onClick={() => handleSendPOToSupplier(po.id)}
+                          className="px-2.5 py-1 rounded-lg border border-border text-xs font-medium text-muted hover:text-accent hover:border-accent/40"
+                          title="Send PO to supplier"
+                        >
+                          Send PO
+                        </button>
+                      )}
                       {po.status === 'DRAFT' && <button onClick={() => handleApprovePO(po.id)} className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-muted hover:text-emerald-400" title="Approve"><CheckCircle className="w-4 h-4" /></button>}
                       {(po.status === 'APPROVED' || po.status === 'PARTIALLY_RECEIVED') && <button onClick={() => handleReceivePO(po.id)} className="p-1.5 rounded-lg hover:bg-blue-500/10 text-muted hover:text-blue-400" title="Receive"><ArrowDownCircle className="w-4 h-4" /></button>}
+                      {po.status !== 'CANCELLED' && po.balanceDue > 0 && (
+                        <button onClick={() => openPaymentModal(po)} className="p-1.5 rounded-lg hover:bg-purple-500/10 text-muted hover:text-purple-400" title="Record Payment">
+                          <span className="text-sm font-bold">₹</span>
+                        </button>
+                      )}
                       {po.status === 'DRAFT' && <button onClick={() => handleCancelPO(po.id)} className="p-1.5 rounded-lg hover:bg-red-500/10 text-muted hover:text-red-400" title="Cancel"><XCircle className="w-4 h-4" /></button>}
                     </div>
                   </td>
+                      </>
+                    )
+                  })()}
                 </tr>
               ))}
             </tbody>
@@ -253,7 +475,15 @@ export default function PurchasesPage() {
                   <h3 className="font-semibold text-foreground">{s.name}</h3>
                   {s.contactPerson && <p className="text-xs text-muted mt-0.5">{s.contactPerson}</p>}
                 </div>
-                <span className="text-xs text-muted bg-surface-hover px-2 py-1 rounded-full">{s._count?.purchaseOrders || 0} POs</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => openEditSupplierModal(s)}
+                    className="px-2.5 py-1 rounded-lg border border-border text-xs font-medium text-muted hover:text-accent hover:border-accent/40"
+                  >
+                    Edit
+                  </button>
+                  <span className="text-xs text-muted bg-surface-hover px-2 py-1 rounded-full">{s._count?.purchaseOrders || 0} POs</span>
+                </div>
               </div>
               <div className="space-y-1.5 text-sm text-muted">
                 {s.phone && <p>Phone: {s.phone}</p>}
@@ -300,8 +530,12 @@ export default function PurchasesPage() {
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div><span className="text-muted">Supplier:</span> <span className="text-foreground font-medium ml-1">{selectedPO.supplier?.name}</span></div>
               <div><span className="text-muted">Date:</span> <span className="text-foreground ml-1">{new Date(selectedPO.date).toLocaleDateString('en-IN')}</span></div>
+              <div><span className="text-muted">Expected:</span> <span className="text-foreground ml-1">{selectedPO.expectedDate ? new Date(selectedPO.expectedDate).toLocaleDateString('en-IN') : '—'}</span></div>
               <div><span className="text-muted">Status:</span> <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${poStatusColors[selectedPO.status]}`}>{selectedPO.status}</span></div>
+              <div><span className="text-muted">ITC:</span> <span className="text-foreground ml-1">{selectedPO.itcEligible ? selectedPO.itcCategory?.replace(/_/g, ' ') : 'Ineligible'}</span></div>
+              <div><span className="text-muted">RCM:</span> <span className="text-foreground ml-1">{selectedPO.isRCM ? 'Yes' : 'No'}</span></div>
               <div><span className="text-muted">Total:</span> <span className="text-foreground font-medium ml-1">₹{selectedPO.total?.toLocaleString('en-IN')}</span></div>
+              <div><span className="text-muted">Balance:</span> <span className="text-foreground font-medium ml-1">₹{selectedPO.balanceDue?.toLocaleString('en-IN')}</span></div>
             </div>
             <table className="w-full text-sm border border-border rounded-lg overflow-hidden">
               <thead><tr className="bg-surface-hover">
@@ -325,12 +559,82 @@ export default function PurchasesPage() {
               <div><span className="text-muted">GST:</span> <span className="font-medium ml-1">₹{selectedPO.gst?.toLocaleString('en-IN')}</span></div>
               <div><span className="text-muted">Discount:</span> <span className="font-medium ml-1">₹{selectedPO.discount?.toLocaleString('en-IN')}</span></div>
             </div>
+
+            <div className="border-t border-border pt-3 space-y-2">
+              <p className="text-xs font-semibold text-muted uppercase tracking-wide">PO Status Actions</p>
+              <div className="flex flex-wrap items-center gap-2">
+                {selectedPO.status === 'DRAFT' && (
+                  <button
+                    onClick={() => handleEditPO(selectedPO)}
+                    className="px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-muted hover:text-accent hover:border-accent/40"
+                  >
+                    Edit PO
+                  </button>
+                )}
+
+                {selectedPO.status !== 'CANCELLED' && (
+                  <button
+                    onClick={() => handleSendPOToSupplier(selectedPO.id)}
+                    className="px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-muted hover:text-accent hover:border-accent/40"
+                  >
+                    Send PO To Supplier
+                  </button>
+                )}
+
+                {selectedPO.status === 'DRAFT' && (
+                  <button
+                    onClick={() => {
+                      handleApprovePO(selectedPO.id)
+                      setShowDetailModal(false)
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 text-xs font-medium hover:bg-emerald-500/20"
+                  >
+                    Approve PO
+                  </button>
+                )}
+
+                {(selectedPO.status === 'APPROVED' || selectedPO.status === 'PARTIALLY_RECEIVED') && (
+                  <button
+                    onClick={() => {
+                      handleReceivePO(selectedPO.id)
+                      setShowDetailModal(false)
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-blue-500/10 text-blue-400 text-xs font-medium hover:bg-blue-500/20"
+                  >
+                    Mark Received
+                  </button>
+                )}
+
+                {selectedPO.status === 'DRAFT' && (
+                  <button
+                    onClick={() => {
+                      handleCancelPO(selectedPO.id)
+                      setShowDetailModal(false)
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 text-xs font-medium hover:bg-red-500/20"
+                  >
+                    Cancel PO
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {selectedPO.notes && (
+              <div className="border-t border-border pt-3">
+                <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-1.5">Notes & Activity</p>
+                <pre className="whitespace-pre-wrap text-xs text-foreground bg-surface border border-border rounded-lg p-2.5">{selectedPO.notes}</pre>
+              </div>
+            )}
           </div>
         )}
       </Modal>
 
       {/* Create Supplier Modal */}
-      <Modal isOpen={showSupplierModal} onClose={() => setShowSupplierModal(false)} title="Add Supplier">
+      <Modal
+        isOpen={showSupplierModal}
+        onClose={() => { setShowSupplierModal(false); resetSupplierForm() }}
+        title={editingSupplierId ? 'Edit Supplier' : 'Add Supplier'}
+      >
         <div className="space-y-4">
           {[
             { key: 'name', label: 'Name *', type: 'text' },
@@ -349,20 +653,65 @@ export default function PurchasesPage() {
             <label className="text-sm text-muted mb-1 block">Address</label>
             <textarea value={supplierForm.address} onChange={e => setSupplierForm(p => ({ ...p, address: e.target.value }))} rows={2} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
           </div>
-          <button onClick={handleCreateSupplier} disabled={submitting || !supplierForm.name} className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50">
-            {submitting ? 'Creating...' : 'Create Supplier'}
+          <button onClick={handleSaveSupplier} disabled={submitting || !supplierForm.name} className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50">
+            {submitting ? (editingSupplierId ? 'Updating...' : 'Creating...') : (editingSupplierId ? 'Update Supplier' : 'Create Supplier')}
           </button>
         </div>
       </Modal>
 
       {/* Create PO Modal */}
-      <Modal isOpen={showPOModal} onClose={() => setShowPOModal(false)} title="Create Purchase Order" size="lg">
+      <Modal
+        isOpen={showPOModal}
+        onClose={() => { setShowPOModal(false); resetPOForm() }}
+        title={editingPOId ? 'Edit Purchase Order' : 'Create Purchase Order'}
+        size="lg"
+      >
         <div className="space-y-4">
-          <div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
             <label className="text-sm text-muted mb-1 block">Supplier *</label>
             <select value={poForm.supplierId} onChange={e => setPOForm(p => ({ ...p, supplierId: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground">
               <option value="">Select Supplier</option>
               {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            </div>
+            <div>
+              <label className="text-sm text-muted mb-1 block">Expected Delivery</label>
+              <input
+                type="date"
+                value={poForm.expectedDate}
+                onChange={e => setPOForm(p => ({ ...p, expectedDate: e.target.value }))}
+                className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <label className="flex items-center gap-2 text-xs text-foreground border border-border rounded-lg px-3 py-2">
+              <input
+                type="checkbox"
+                checked={poForm.itcEligible}
+                onChange={e => setPOForm(p => ({ ...p, itcEligible: e.target.checked }))}
+              />
+              ITC Eligible
+            </label>
+            <label className="flex items-center gap-2 text-xs text-foreground border border-border rounded-lg px-3 py-2">
+              <input
+                type="checkbox"
+                checked={poForm.isRCM}
+                onChange={e => setPOForm(p => ({ ...p, isRCM: e.target.checked }))}
+              />
+              RCM Purchase
+            </label>
+            <select
+              value={poForm.itcCategory}
+              onChange={e => setPOForm(p => ({ ...p, itcCategory: e.target.value }))}
+              className="px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground"
+              disabled={!poForm.itcEligible}
+            >
+              {ITC_CATEGORIES.map(category => (
+                <option key={category} value={category}>{category.replace(/_/g, ' ')}</option>
+              ))}
             </select>
           </div>
 
@@ -378,10 +727,30 @@ export default function PurchasesPage() {
                   {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
                 </select>
                 <input type="number" min="1" value={item.quantity} onChange={e => { const v = [...poForm.items]; v[i].quantity = e.target.value; setPOForm(f => ({ ...f, items: v })) }} placeholder="Qty" className="col-span-2 px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
-                <input type="number" min="0" value={item.unitCost} onChange={e => { const v = [...poForm.items]; v[i].unitCost = e.target.value; setPOForm(f => ({ ...f, items: v })) }} placeholder="Cost" className="col-span-3 px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
+                <input type="number" min="0" value={item.unitCost} onChange={e => { const v = [...poForm.items]; v[i].unitCost = e.target.value; setPOForm(f => ({ ...f, items: v })) }} placeholder="Cost" className="col-span-2 px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
+                <input type="number" min="0" max="100" value={item.gstRate || 18} onChange={e => { const v = [...poForm.items]; v[i].gstRate = e.target.value; setPOForm(f => ({ ...f, items: v })) }} placeholder="GST%" className="col-span-1 px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
                 <button onClick={() => setPOForm(f => ({ ...f, items: f.items.filter((_, j) => j !== i) }))} className="col-span-1 text-red-400 hover:text-red-300 text-lg">×</button>
               </div>
             ))}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-sm text-muted mb-1 block">Order Discount (₹)</label>
+              <input
+                type="number"
+                min="0"
+                value={poForm.discount}
+                onChange={e => setPOForm(p => ({ ...p, discount: e.target.value }))}
+                className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground"
+              />
+            </div>
+            <div className="bg-surface border border-border rounded-lg p-2.5 text-xs text-muted">
+              <p>Subtotal: <span className="text-foreground font-medium">₹{poPreview.subtotal.toLocaleString('en-IN')}</span></p>
+              <p>Discount: <span className="text-foreground font-medium">₹{poPreview.discount.toLocaleString('en-IN')}</span></p>
+              <p>GST: <span className="text-foreground font-medium">₹{poPreview.gst.toLocaleString('en-IN')}</span></p>
+              <p className="text-sm text-foreground font-semibold mt-1">PO Total: ₹{poPreview.total.toLocaleString('en-IN')}</p>
+            </div>
           </div>
 
           <div>
@@ -390,7 +759,40 @@ export default function PurchasesPage() {
           </div>
 
           <button onClick={handleCreatePO} disabled={submitting || !poForm.supplierId || !poForm.items.some(i => i.productId)} className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50">
-            {submitting ? 'Creating...' : 'Create Purchase Order'}
+            {submitting ? (editingPOId ? 'Updating...' : 'Creating...') : (editingPOId ? 'Update Purchase Order' : 'Create Purchase Order')}
+          </button>
+        </div>
+      </Modal>
+
+      {/* Record Payment Modal */}
+      <Modal isOpen={showPaymentModal} onClose={() => setShowPaymentModal(false)} title="Record PO Payment">
+        <div className="space-y-4">
+          <div>
+            <label className="text-sm text-muted mb-1 block">Amount (₹) *</label>
+            <input
+              type="number"
+              min="1"
+              value={paymentForm.amount}
+              onChange={e => setPaymentForm(f => ({ ...f, amount: e.target.value }))}
+              className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground"
+            />
+          </div>
+          <div>
+            <label className="text-sm text-muted mb-1 block">Note (optional)</label>
+            <input
+              type="text"
+              value={paymentForm.note}
+              onChange={e => setPaymentForm(f => ({ ...f, note: e.target.value }))}
+              placeholder="UTR / cheque / remark"
+              className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground"
+            />
+          </div>
+          <button
+            onClick={handleRecordPayment}
+            disabled={submitting || !paymentForm.amount}
+            className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50"
+          >
+            {submitting ? 'Saving...' : 'Save Payment'}
           </button>
         </div>
       </Modal>

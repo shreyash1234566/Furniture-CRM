@@ -25,13 +25,27 @@ import ReturningCustomerCard from '@/components/ReturningCustomerCard';
 
 const customOrderStatuses = ['All', 'Measurement Scheduled', 'Design Phase', 'In Production', 'Quality Check', 'Installation', 'Delivered'];
 
-const notificationTemplates = {
-  'Measurement Scheduled': (o) => `Hi ${o.customer}! Your custom furniture order ${o.id} has been confirmed. Our team will visit you at ${o.address} to take measurements. We'll keep you updated every step of the way! 🛋️`,
-  'Design Phase': (o) => `Hi ${o.customer}! Great news — your order ${o.id} (${o.type}) is now in the Design Phase. Our designers are working on your custom piece. We'll share updates soon! 🎨`,
-  'In Production': (o) => `Hi ${o.customer}! Your custom ${o.type} (Order ${o.id}) is now In Production. Our craftsmen are bringing your vision to life.${o.estimatedDelivery ? ` Estimated delivery: ${o.estimatedDelivery}.` : ''} Stay tuned! 🔨`,
-  'Quality Check': (o) => `Hi ${o.customer}! Almost there! Your order ${o.id} is currently undergoing Quality Check. We ensure every piece meets our highest standards before it reaches you. ✅`,
-  'Installation': (o) => `Hi ${o.customer}! Exciting news — your custom ${o.type} (Order ${o.id}) is ready for installation! Our team will contact you shortly to schedule a convenient time. 🚚`,
-  'Delivered': (o) => `Hi ${o.customer}! 🎉 Your custom ${o.type} (Order ${o.id}) has been delivered! Thank you for choosing us. We hope you love your new furniture. Please share your feedback anytime!`,
+const notifyTemplateOptions = [
+  {
+    key: 'ORDER_CONFIRMED',
+    label: 'Order Confirmed',
+    buildMessage: (o) => `Hi ${o.customer}! Your custom furniture order ${o.id} has been confirmed. Our team will visit you at ${o.address} to take measurements. We'll keep you updated every step of the way! 🛋️`,
+  },
+  {
+    key: 'INSTALLATION',
+    label: 'Installation',
+    buildMessage: (o) => `Hi ${o.customer}! Exciting news — your custom ${o.type} (Order ${o.id}) is ready for installation! Our team will contact you shortly to schedule a convenient time. 🚚`,
+  },
+  {
+    key: 'DELIVERED',
+    label: 'Delivered',
+    buildMessage: (o) => `Hi ${o.customer}! 🎉 Your custom ${o.type} (Order ${o.id}) has been delivered! Thank you for choosing us. We hope you love your new furniture. Please share your feedback anytime!`,
+  },
+];
+
+const defaultNotifyTemplateForStatus = {
+  Installation: 'INSTALLATION',
+  Delivered: 'DELIVERED',
 };
 
 const statusConfig = {
@@ -72,6 +86,7 @@ export default function CustomOrdersPage() {
   // Notify customer modal
   const [showNotify, setShowNotify] = useState(false);
   const [notifyOrderId, setNotifyOrderId] = useState(null);
+  const [notifyTemplateKey, setNotifyTemplateKey] = useState('ORDER_CONFIRMED');
   const [notifyMessage, setNotifyMessage] = useState('');
   const [notifyChannels, setNotifyChannels] = useState({ whatsapp: true, email: false });
   const [notifySending, setNotifySending] = useState(false);
@@ -221,8 +236,10 @@ export default function CustomOrdersPage() {
   // ─── NOTIFY CUSTOMER HANDLER ──────────────────────────
 
   const openNotifyModal = async (order) => {
-    const template = notificationTemplates[order.status];
-    setNotifyMessage(template ? template(order) : `Hi ${order.customer}! Your order ${order.id} status: ${order.status}.`);
+    const templateKey = defaultNotifyTemplateForStatus[order.status] || 'ORDER_CONFIRMED';
+    const template = notifyTemplateOptions.find(t => t.key === templateKey);
+    setNotifyTemplateKey(templateKey);
+    setNotifyMessage(template ? template.buildMessage(order) : `Hi ${order.customer}! Your order ${order.id} status: ${order.status}.`);
     setNotifyOrderId(order.dbId);
     setNotifyResult(null);
     setWaConfig(null);
@@ -906,14 +923,17 @@ export default function CustomOrdersPage() {
               <div>
                 <p className="text-xs font-medium text-muted mb-2 uppercase tracking-wide">Quick Templates</p>
                 <div className="flex flex-wrap gap-1.5">
-                  {Object.keys(notificationTemplates).map(status => (
+                  {notifyTemplateOptions.map(template => (
                     <button
-                      key={status}
+                      key={template.key}
                       type="button"
-                      onClick={() => setNotifyMessage(notificationTemplates[status](order))}
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all border ${order.status === status ? 'bg-accent text-white border-accent' : 'bg-surface text-muted border-border hover:text-foreground hover:border-foreground/20'}`}
+                      onClick={() => {
+                        setNotifyTemplateKey(template.key);
+                        setNotifyMessage(template.buildMessage(order));
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all border ${notifyTemplateKey === template.key ? 'bg-accent text-white border-accent' : 'bg-surface text-muted border-border hover:text-foreground hover:border-foreground/20'}`}
                     >
-                      {status}
+                      {template.label}
                     </button>
                   ))}
                 </div>
@@ -921,14 +941,15 @@ export default function CustomOrdersPage() {
 
               {/* Message editor */}
               <div>
-                <label className="block text-xs font-medium text-muted mb-1.5 uppercase tracking-wide">Message</label>
+                <label className="block text-xs font-medium text-muted mb-1.5 uppercase tracking-wide">Message Preview (Template Only)</label>
                 <textarea
                   rows={5}
                   value={notifyMessage}
-                  onChange={e => setNotifyMessage(e.target.value)}
+                  readOnly
                   className="w-full px-4 py-3 rounded-xl text-sm resize-none border border-border bg-surface focus:outline-none focus:border-accent transition-colors"
-                  placeholder="Type your message to the customer..."
+                  placeholder="Select a template above..."
                 />
+                <p className="text-[10px] text-muted mt-1">Custom typing is disabled. Use one of the three templates above.</p>
                 <p className="text-[10px] text-muted mt-1 text-right">{notifyMessage.length} characters</p>
               </div>
 
