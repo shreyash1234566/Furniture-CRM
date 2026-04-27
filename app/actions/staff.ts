@@ -274,6 +274,30 @@ export async function updateStaffMember(data: unknown) {
   return { success: true }
 }
 
+export async function updateStaffTarget(staffId: number, data: {
+  monthlyTarget: number
+  achieved: number
+  commissionRate: number
+  commissionEarned: number
+  commissionPending: number
+}) {
+  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+
+  const staff = await prisma.staff.findUnique({ where: { id: staffId } })
+  if (!staff) return { success: false, error: 'Staff not found' }
+
+  await prisma.staff.update({
+    where: { id: staffId },
+    data: {
+      target: { monthly: data.monthlyTarget, achieved: data.achieved },
+      commission: { rate: data.commissionRate, earned: data.commissionEarned, pending: data.commissionPending },
+    },
+  })
+
+  revalidatePath('/staff')
+  return { success: true }
+}
+
 // Haversine distance in meters
 function getDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371000

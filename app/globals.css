@@ -192,3 +192,42 @@ input[type="number"] {
     font-size: 0.72rem;
   }
 }
+
+/* ── Mobile bottom safe-area clearance ─────────────────────── */
+/* Reserve space for 60px BottomNav + device safe area inset   */
+.mobile-bottom-safe {
+  padding-bottom: calc(60px + env(safe-area-inset-bottom) + 16px);
+}
+@media (min-width: 768px) {
+  .mobile-bottom-safe {
+    padding-bottom: 24px;
+  }
+}
+
+/* ── Touch target minimum (WCAG 2.5.5) ─────────────────────── */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* ── Mobile stat card compact ───────────────────────────────── */
+@media (max-width: 767px) {
+  .glass-card {
+    border-radius: 14px;
+  }
+}
+
+/* ── Slide-up animation (shared / used by BottomNav drawer) ── */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-slide-up-sheet {
+  animation: slideUp 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* ── Smooth tap feedback for links/buttons on iOS ───────────── */
+a, button {
+  -webkit-tap-highlight-color: transparent;
+}
+

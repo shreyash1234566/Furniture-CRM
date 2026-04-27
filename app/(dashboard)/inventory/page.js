@@ -95,6 +95,7 @@ export default function InventoryPage() {
 
   useEffect(() => {
     if (['stockGroups', 'batches', 'aging'].includes(tab) && stockGroups.length === 0 && !deepLoading) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       loadDeepInventory();
     }
     if (tab === 'location' && godownStocks.length === 0 && !locationLoading) {
@@ -158,32 +159,35 @@ export default function InventoryPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex bg-surface rounded-xl border border-border p-0.5 w-fit flex-wrap overflow-x-auto hide-scrollbar">
-        <button onClick={() => setTab('products')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all flex-shrink-0 ${tab === 'products' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
-          <Package className="w-3.5 h-3.5" /> Products
-        </button>
-        <button onClick={() => setTab('location')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all flex-shrink-0 ${tab === 'location' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
-          <MapPin className="w-3.5 h-3.5" /> Location View
-        </button>
-        <button onClick={() => setTab('alerts')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all flex-shrink-0 ${tab === 'alerts' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
-          <Bell className="w-3.5 h-3.5" /> Stock Alerts
-          {needsReorder.length > 0 && (
-            <span className="w-5 h-5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">{needsReorder.length}</span>
-          )}
-        </button>
-        <button onClick={() => setTab('ledger')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all flex-shrink-0 ${tab === 'ledger' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
-          <FileText className="w-3.5 h-3.5" /> Stock Ledger
-        </button>
-        <button onClick={() => setTab('stockGroups')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all flex-shrink-0 ${tab === 'stockGroups' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
-          <Layers className="w-3.5 h-3.5" /> Groups
-        </button>
-        <button onClick={() => setTab('batches')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all flex-shrink-0 ${tab === 'batches' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
-          <Boxes className="w-3.5 h-3.5" /> Batches
-        </button>
-        <button onClick={() => setTab('aging')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all flex-shrink-0 ${tab === 'aging' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
-          <Timer className="w-3.5 h-3.5" /> Aging
-        </button>
+      <div className="overflow-x-auto hide-scrollbar -mx-3.5 md:mx-0">
+        <div className="flex bg-surface rounded-xl border border-border p-0.5 w-max min-w-full md:w-fit mx-3.5 md:mx-0">
+          <button onClick={() => setTab('products')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 ${tab === 'products' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+            <Package className="w-3.5 h-3.5" /> Products
+          </button>
+          <button onClick={() => setTab('location')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 ${tab === 'location' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+            <MapPin className="w-3.5 h-3.5" /> Location
+          </button>
+          <button onClick={() => setTab('alerts')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 ${tab === 'alerts' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+            <Bell className="w-3.5 h-3.5" /> Alerts
+            {needsReorder.length > 0 && (
+              <span className="w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">{needsReorder.length}</span>
+            )}
+          </button>
+          <button onClick={() => setTab('ledger')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 ${tab === 'ledger' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+            <FileText className="w-3.5 h-3.5" /> Ledger
+          </button>
+          <button onClick={() => setTab('stockGroups')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 ${tab === 'stockGroups' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+            <Layers className="w-3.5 h-3.5" /> Groups
+          </button>
+          <button onClick={() => setTab('batches')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 ${tab === 'batches' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+            <Boxes className="w-3.5 h-3.5" /> Batches
+          </button>
+          <button onClick={() => setTab('aging')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 ${tab === 'aging' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+            <Timer className="w-3.5 h-3.5" /> Aging
+          </button>
+        </div>
       </div>
+
 
       {tab === 'products' && (
         <>
@@ -691,52 +695,127 @@ export default function InventoryPage() {
         <div className="space-y-4">
           {deepLoading ? <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" /></div> : (
             <>
-              {agingData.length > 0 && (
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                  {['0-30 days', '31-60 days', '61-90 days', '91-180 days', '180+ days'].map(bracket => {
-                    const items = agingData.filter(a => a.bracket === bracket);
-                    const value = items.reduce((s, a) => s + a.value, 0);
-                    const colors = { '0-30 days': 'text-emerald-400', '31-60 days': 'text-blue-400', '61-90 days': 'text-amber-400', '91-180 days': 'text-orange-400', '180+ days': 'text-red-400' };
-                    return (
-                      <div key={bracket} className="glass-card p-4">
-                        <p className="text-xs text-muted">{bracket}</p>
-                        <p className={`text-lg font-semibold ${colors[bracket]}`}>₹{value.toLocaleString('en-IN')}</p>
-                        <p className="text-xs text-muted">{items.length} batches</p>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+              {agingData.length > 0 ? (
+                <>
+                  {/* Batch-based aging (when batch records exist) */}
+                  <div className="glass-card p-3 border-l-4 border-accent">
+                    <p className="text-xs text-muted">Showing batch-level aging. Each row represents a product batch received from a supplier.</p>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                    {['0-30 days', '31-60 days', '61-90 days', '91-180 days', '180+ days'].map(bracket => {
+                      const items = agingData.filter(a => a.bracket === bracket);
+                      const value = items.reduce((s, a) => s + a.value, 0);
+                      const colors = { '0-30 days': 'text-emerald-400', '31-60 days': 'text-blue-400', '61-90 days': 'text-amber-400', '91-180 days': 'text-orange-400', '180+ days': 'text-red-400' };
+                      return (
+                        <div key={bracket} className="glass-card p-4">
+                          <p className="text-xs text-muted">{bracket}</p>
+                          <p className={`text-lg font-semibold ${colors[bracket]}`}>₹{value.toLocaleString('en-IN')}</p>
+                          <p className="text-xs text-muted">{items.length} batches</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="glass-card overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead><tr className="border-b border-border">
+                        {['Product', 'SKU', 'Category', 'Batch #', 'Age (Days)', 'Bracket', 'Remaining', 'Value'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>)}
+                      </tr></thead>
+                      <tbody>
+                        {agingData.map((a, i) => (
+                          <tr key={i} className="border-b border-border/50 hover:bg-surface-hover transition-colors">
+                            <td className="px-4 py-3 text-foreground font-medium">{a.product?.name}</td>
+                            <td className="px-4 py-3 text-muted font-mono text-xs">{a.product?.sku}</td>
+                            <td className="px-4 py-3 text-muted">{a.product?.category?.name || '—'}</td>
+                            <td className="px-4 py-3 text-foreground">{a.batchNumber}</td>
+                            <td className="px-4 py-3 text-foreground">{a.ageDays}</td>
+                            <td className="px-4 py-3">
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                a.bracket === '180+ days' ? 'bg-red-500/10 text-red-400' :
+                                a.bracket === '91-180 days' ? 'bg-orange-500/10 text-orange-400' :
+                                a.bracket === '61-90 days' ? 'bg-amber-500/10 text-amber-400' :
+                                'bg-emerald-500/10 text-emerald-400'
+                              }`}>{a.bracket}</span>
+                            </td>
+                            <td className="px-4 py-3 text-foreground">{a.remainingQty}</td>
+                            <td className="px-4 py-3 text-foreground">₹{a.value?.toLocaleString('en-IN')}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Product-based aging fallback (when no batch records) */}
+                  <div className="glass-card p-3 border-l-4 border-amber-500">
+                    <p className="text-xs text-foreground font-medium">Showing product-level aging based on last restock date.</p>
+                    <p className="text-xs text-muted mt-0.5">For batch-level aging (FIFO/FEFO), add batches in the Batches tab when you receive stock.</p>
+                  </div>
+                  {(() => {
+                    const now = new Date();
+                    const productAging = products
+                      .filter(p => p.stock > 0)
+                      .map(p => {
+                        const refDate = p.lastRestocked ? new Date(p.lastRestocked) : new Date(p.createdAt || now);
+                        const ageDays = Math.floor((now - refDate) / (1000 * 60 * 60 * 24));
+                        let bracket = '0-30 days';
+                        if (ageDays > 180) bracket = '180+ days';
+                        else if (ageDays > 90) bracket = '91-180 days';
+                        else if (ageDays > 60) bracket = '61-90 days';
+                        else if (ageDays > 30) bracket = '31-60 days';
+                        return { ...p, ageDays, bracket, value: p.stock * (p.costPrice || 0) };
+                      })
+                      .sort((a, b) => b.ageDays - a.ageDays);
 
-              <div className="glass-card overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead><tr className="border-b border-border">
-                    {['Product', 'SKU', 'Category', 'Batch #', 'Age (Days)', 'Bracket', 'Remaining', 'Value'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>)}
-                  </tr></thead>
-                  <tbody>
-                    {agingData.map((a, i) => (
-                      <tr key={i} className="border-b border-border/50 hover:bg-surface-hover transition-colors">
-                        <td className="px-4 py-3 text-foreground font-medium">{a.product?.name}</td>
-                        <td className="px-4 py-3 text-muted font-mono text-xs">{a.product?.sku}</td>
-                        <td className="px-4 py-3 text-muted">{a.product?.category?.name || '—'}</td>
-                        <td className="px-4 py-3 text-foreground">{a.batchNumber}</td>
-                        <td className="px-4 py-3 text-foreground">{a.ageDays}</td>
-                        <td className="px-4 py-3">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            a.bracket === '180+ days' ? 'bg-red-500/10 text-red-400' :
-                            a.bracket === '91-180 days' ? 'bg-orange-500/10 text-orange-400' :
-                            a.bracket === '61-90 days' ? 'bg-amber-500/10 text-amber-400' :
-                            'bg-emerald-500/10 text-emerald-400'
-                          }`}>{a.bracket}</span>
-                        </td>
-                        <td className="px-4 py-3 text-foreground">{a.remainingQty}</td>
-                        <td className="px-4 py-3 text-foreground">₹{a.value?.toLocaleString('en-IN')}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {agingData.length === 0 && <div className="text-center py-12 text-muted">No batch data available for aging analysis. Add product batches first.</div>}
-              </div>
+                    const bracketColors = { '0-30 days': 'text-emerald-400', '31-60 days': 'text-blue-400', '61-90 days': 'text-amber-400', '91-180 days': 'text-orange-400', '180+ days': 'text-red-400' };
+                    const bracketBg = { '0-30 days': 'bg-emerald-500/10', '31-60 days': 'bg-blue-500/10', '61-90 days': 'bg-amber-500/10', '91-180 days': 'bg-orange-500/10', '180+ days': 'bg-red-500/10' };
+
+                    return (
+                      <>
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                          {['0-30 days', '31-60 days', '61-90 days', '91-180 days', '180+ days'].map(bracket => {
+                            const items = productAging.filter(p => p.bracket === bracket);
+                            const value = items.reduce((s, p) => s + p.value, 0);
+                            return (
+                              <div key={bracket} className="glass-card p-4">
+                                <p className="text-xs text-muted">{bracket}</p>
+                                <p className={`text-lg font-semibold ${bracketColors[bracket]}`}>₹{value.toLocaleString('en-IN')}</p>
+                                <p className="text-xs text-muted">{items.length} products</p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="glass-card overflow-hidden">
+                          <table className="w-full text-sm">
+                            <thead><tr className="border-b border-border">
+                              {['Product', 'SKU', 'Category', 'Last Restocked', 'Age (Days)', 'Bracket', 'Stock', 'Value'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>)}
+                            </tr></thead>
+                            <tbody>
+                              {productAging.length === 0
+                                ? <tr><td colSpan={8} className="text-center py-12 text-muted">No in-stock products found.</td></tr>
+                                : productAging.map((p, i) => (
+                                  <tr key={i} className="border-b border-border/50 hover:bg-surface-hover transition-colors">
+                                    <td className="px-4 py-3 text-foreground font-medium">{p.name}</td>
+                                    <td className="px-4 py-3 text-muted font-mono text-xs">{p.sku}</td>
+                                    <td className="px-4 py-3 text-muted">{p.category || '—'}</td>
+                                    <td className="px-4 py-3 text-muted">{p.lastRestocked ? new Date(p.lastRestocked).toLocaleDateString('en-IN') : 'Not recorded'}</td>
+                                    <td className="px-4 py-3 text-foreground">{p.ageDays}d</td>
+                                    <td className="px-4 py-3">
+                                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${bracketBg[p.bracket]} ${bracketColors[p.bracket]}`}>{p.bracket}</span>
+                                    </td>
+                                    <td className="px-4 py-3 text-foreground">{p.stock}</td>
+                                    <td className="px-4 py-3 text-foreground">₹{p.value.toLocaleString('en-IN')}</td>
+                                  </tr>
+                                ))
+                              }
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </>
+              )}
             </>
           )}
         </div>

@@ -376,14 +376,14 @@ export default function MarketingPage() {
               <div className="flex flex-wrap gap-2">
                 {Object.entries(importColMap).map(([field, idx]) => (
                   <span key={field} className="px-2 py-1 bg-accent/10 text-accent text-[11px] rounded-lg font-medium">
-                    {field} → "{importHeaders[idx]}"
+                    {field} → &quot;{importHeaders[idx]}&quot;
                   </span>
                 ))}
                 {!('name' in importColMap) && (
-                  <span className="px-2 py-1 bg-red-500/10 text-red-700 text-[11px] rounded-lg font-medium">⚠ No "Name" column</span>
+                  <span className="px-2 py-1 bg-red-500/10 text-red-700 text-[11px] rounded-lg font-medium">⚠ No &quot;Name&quot; column</span>
                 )}
                 {!('phone' in importColMap) && (
-                  <span className="px-2 py-1 bg-red-500/10 text-red-700 text-[11px] rounded-lg font-medium">⚠ No "Phone" column</span>
+                  <span className="px-2 py-1 bg-red-500/10 text-red-700 text-[11px] rounded-lg font-medium">⚠ No &quot;Phone&quot; column</span>
                 )}
               </div>
 

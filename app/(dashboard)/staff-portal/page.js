@@ -192,28 +192,21 @@ export default function StaffPortalPage() {
 
     const entered = accessKey.trim();
     if (!entered) {
-      setLoginError('Please enter password or PIN');
+      setLoginError('Please enter your password');
       return;
     }
 
     setLoginSubmitting(true);
     try {
-      let authenticated = false;
-
-      // If login credentials exist, try password verification first.
-      if (found.hasLogin) {
-        const res = await verifyStaffPortalPassword(found.id, entered);
-        authenticated = !!res.success;
+      // Require assigned login credentials
+      if (!found.hasLogin) {
+        setLoginError('No login credentials assigned. Please contact your admin.');
+        return;
       }
 
-      // PIN fallback: last 4 digits of phone number.
-      if (!authenticated) {
-        const expectedPin = (found.phone || '').replace(/\s/g, '').slice(-4);
-        authenticated = entered === expectedPin;
-      }
-
-      if (!authenticated) {
-        setLoginError('Invalid password or PIN');
+      const res = await verifyStaffPortalPassword(found.id, entered);
+      if (!res.success) {
+        setLoginError(res.error || 'Invalid password');
         return;
       }
 
@@ -533,12 +526,12 @@ export default function StaffPortalPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-muted mb-1.5">Enter Password or PIN</label>
+                <label className="block text-xs font-medium text-muted mb-1.5">Enter Password</label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
                   <input
                     type="password"
-                    placeholder="Password or PIN"
+                    placeholder="Your assigned password"
                     value={accessKey}
                     onChange={e => { setAccessKey(e.target.value); setLoginError(''); }}
                     className="w-full pl-10 pr-4 py-3 bg-surface rounded-xl border border-border text-sm"
@@ -557,7 +550,7 @@ export default function StaffPortalPage() {
               </button>
             </form>
 
-            <p className="text-[10px] text-muted text-center mt-6">Enter either assigned password or PIN (last 4 digits of registered phone).</p>
+            <p className="text-[10px] text-muted text-center mt-6">Contact your admin if you haven&apos;t been assigned a login password.</p>
           </div>
         </div>
       </div>

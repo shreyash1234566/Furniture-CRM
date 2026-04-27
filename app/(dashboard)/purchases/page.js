@@ -71,7 +71,7 @@ export default function PurchasesPage() {
   const [supplierForm, setSupplierForm] = useState(createEmptySupplierForm())
   const [poForm, setPOForm] = useState(createEmptyPOForm())
   const [returnForm, setReturnForm] = useState({ poId: '', supplierId: '', reason: '', notes: '', items: [{ productId: '', quantity: 1, unitCost: 0 }] })
-  const [paymentForm, setPaymentForm] = useState({ poId: '', amount: '', note: '' })
+  const [paymentForm, setPaymentForm] = useState({ poId: '', amount: '', note: '', method: 'Bank Transfer', reference: '', paidAt: new Date().toISOString().slice(0, 10) })
 
   const loadData = () => {
     setLoading(true)
@@ -274,7 +274,14 @@ export default function PurchasesPage() {
   }
 
   const openPaymentModal = (po) => {
-    setPaymentForm({ poId: po.id, amount: String(po.balanceDue || ''), note: '' })
+    setPaymentForm({
+      poId: po.id,
+      amount: String(po.balanceDue || ''),
+      note: '',
+      method: 'Bank Transfer',
+      reference: '',
+      paidAt: new Date().toISOString().slice(0, 10),
+    })
     setShowPaymentModal(true)
   }
 
@@ -286,10 +293,17 @@ export default function PurchasesPage() {
     }
 
     setSubmitting(true)
-    const res = await recordPurchaseOrderPayment(Number(paymentForm.poId), amount, paymentForm.note)
+    const res = await recordPurchaseOrderPayment(
+      Number(paymentForm.poId),
+      amount,
+      paymentForm.note,
+      paymentForm.method,
+      paymentForm.reference,
+      paymentForm.paidAt
+    )
     if (res.success) {
       setShowPaymentModal(false)
-      setPaymentForm({ poId: '', amount: '', note: '' })
+      setPaymentForm({ poId: '', amount: '', note: '', method: 'Bank Transfer', reference: '', paidAt: new Date().toISOString().slice(0, 10) })
       loadData()
     } else {
       alert(res.error)
@@ -519,7 +533,16 @@ export default function PurchasesPage() {
               ))}
             </tbody>
           </table>
-          {returns.length === 0 && <div className="text-center py-12 text-muted">No purchase returns found</div>}
+          {returns.length === 0 && (
+            <div className="text-center py-16 space-y-3">
+              <RotateCcw className="w-10 h-10 text-muted mx-auto opacity-40" />
+              <p className="text-muted text-sm font-medium">No purchase returns yet</p>
+              <p className="text-muted text-xs">Use the <strong className="text-foreground">New Return</strong> button (top right) or click below to create one</p>
+              <button onClick={() => setShowReturnModal(true)} className="mt-2 px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2 mx-auto">
+                <Plus className="w-4 h-4" /> Create First Return
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -767,6 +790,27 @@ export default function PurchasesPage() {
       {/* Record Payment Modal */}
       <Modal isOpen={showPaymentModal} onClose={() => setShowPaymentModal(false)} title="Record PO Payment">
         <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-sm text-muted mb-1 block">Payment Date *</label>
+              <input
+                type="date"
+                value={paymentForm.paidAt}
+                onChange={e => setPaymentForm(f => ({ ...f, paidAt: e.target.value }))}
+                className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground"
+              />
+            </div>
+            <div>
+              <label className="text-sm text-muted mb-1 block">Method *</label>
+              <select
+                value={paymentForm.method}
+                onChange={e => setPaymentForm(f => ({ ...f, method: e.target.value }))}
+                className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground"
+              >
+                {['Bank Transfer', 'UPI', 'Cash', 'Cheque', 'Card'].map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+          </div>
           <div>
             <label className="text-sm text-muted mb-1 block">Amount (₹) *</label>
             <input
@@ -774,6 +818,16 @@ export default function PurchasesPage() {
               min="1"
               value={paymentForm.amount}
               onChange={e => setPaymentForm(f => ({ ...f, amount: e.target.value }))}
+              className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground"
+            />
+          </div>
+          <div>
+            <label className="text-sm text-muted mb-1 block">Reference (optional)</label>
+            <input
+              type="text"
+              value={paymentForm.reference}
+              onChange={e => setPaymentForm(f => ({ ...f, reference: e.target.value }))}
+              placeholder="UTR / cheque no / txn id"
               className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground"
             />
           </div>
@@ -789,7 +843,7 @@ export default function PurchasesPage() {
           </div>
           <button
             onClick={handleRecordPayment}
-            disabled={submitting || !paymentForm.amount}
+            disabled={submitting || !paymentForm.amount || !paymentForm.method || !paymentForm.paidAt}
             className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50"
           >
             {submitting ? 'Saving...' : 'Save Payment'}

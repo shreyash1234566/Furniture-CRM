@@ -2,31 +2,44 @@ import { TrendingUp, TrendingDown } from 'lucide-react';
 
 export default function StatCard({ title, value, change, changeType, icon: Icon, color = 'accent' }) {
   const colorMap = {
-    accent: { bg: 'bg-accent-light', text: 'text-accent' },
-    teal: { bg: 'bg-teal-light', text: 'text-teal' },
-    purple: { bg: 'bg-purple-light', text: 'text-purple' },
-    success: { bg: 'bg-success-light', text: 'text-success' },
-    info: { bg: 'bg-info-light', text: 'text-info' },
-    pink: { bg: 'bg-pink-light', text: 'text-pink' },
+    accent:  { bg: 'bg-accent-light',   text: 'text-accent',   border: 'border-accent/20' },
+    teal:    { bg: 'bg-teal-light',     text: 'text-teal',     border: 'border-teal/20' },
+    purple:  { bg: 'bg-purple-light',   text: 'text-purple',   border: 'border-purple/20' },
+    success: { bg: 'bg-success-light',  text: 'text-success',  border: 'border-success/20' },
+    info:    { bg: 'bg-info-light',     text: 'text-info',     border: 'border-info/20' },
+    pink:    { bg: 'bg-pink-light',     text: 'text-pink',     border: 'border-pink/20' },
   };
 
   const c = colorMap[color] || colorMap.accent;
 
   return (
-    <div className="glass-card p-3 md:p-5 flex items-start justify-between animate-[slide-up_0.3s_ease-out] cursor-default">
-      <div className="space-y-1 md:space-y-1.5 min-w-0">
-        <p className="text-[10px] md:text-[11px] font-semibold text-muted uppercase tracking-wider">{title}</p>
-        <p className="text-lg md:text-2xl font-bold text-foreground tracking-tight">{value}</p>
+    <div className="glass-card p-3 md:p-5 flex flex-col md:flex-row md:items-start md:justify-between gap-2.5 animate-[slide-up_0.3s_ease-out] cursor-default active:scale-[0.98] transition-transform">
+      {/* Mobile: icon row + value stacked */}
+      <div className="flex items-center justify-between md:hidden">
+        <p className="text-[10px] font-semibold text-muted uppercase tracking-wider leading-tight">{title}</p>
+        <div className={`p-2 rounded-xl ${c.bg} ${c.border} border`}>
+          <Icon className={`w-3.5 h-3.5 ${c.text}`} />
+        </div>
+      </div>
+
+      <div className="space-y-0.5 md:space-y-1.5 min-w-0">
+        {/* Desktop title */}
+        <p className="hidden md:block text-[11px] font-semibold text-muted uppercase tracking-wider">{title}</p>
+        <p className="text-xl md:text-2xl font-bold text-foreground tracking-tight leading-none">{value}</p>
         {change && (
           <div className={`flex items-center gap-1 text-[10px] md:text-xs font-medium ${changeType === 'up' ? 'text-success' : 'text-danger'}`}>
-            {changeType === 'up' ? <TrendingUp className="w-3 h-3 md:w-3.5 md:h-3.5" /> : <TrendingDown className="w-3 h-3 md:w-3.5 md:h-3.5" />}
+            {changeType === 'up'
+              ? <TrendingUp className="w-3 h-3 md:w-3.5 md:h-3.5 flex-shrink-0" />
+              : <TrendingDown className="w-3 h-3 md:w-3.5 md:h-3.5 flex-shrink-0" />}
             <span>{change}</span>
-            <span className="text-muted ml-1 hidden sm:inline">vs last week</span>
+            <span className="text-muted ml-0.5 hidden sm:inline">vs last week</span>
           </div>
         )}
       </div>
-      <div className={`p-2 md:p-2.5 rounded-xl ${c.bg}`}>
-        <Icon className={`w-4 h-4 md:w-5 md:h-5 ${c.text}`} />
+
+      {/* Desktop icon */}
+      <div className={`hidden md:flex p-2.5 rounded-xl ${c.bg} flex-shrink-0`}>
+        <Icon className={`w-5 h-5 ${c.text}`} />
       </div>
     </div>
   );

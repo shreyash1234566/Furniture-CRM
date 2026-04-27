@@ -54,7 +54,11 @@ export default function GodownsPage() {
       })
   }
 
-  useEffect(() => { loadData() }, [])
+  useEffect(() => {
+    // Initial warehouse bootstrap fetch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadData()
+  }, [])
 
   useEffect(() => {
     if (tab === 'ledger' && ledgerEntries.length === 0) {
@@ -347,7 +351,7 @@ export default function GodownsPage() {
                 </tbody>
               </table>
             </div>
-            {filteredStocks.length === 0 && <div className="text-center py-12 text-muted">No stock records found. Use "Assign Stock" or "Sync Stock" to allocate products to godowns.</div>}
+            {filteredStocks.length === 0 && <div className="text-center py-12 text-muted">No stock records found. Use &quot;Assign Stock&quot; or &quot;Sync Stock&quot; to allocate products to godowns.</div>}
           </div>
         </div>
       )}

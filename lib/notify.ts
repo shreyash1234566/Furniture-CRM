@@ -4,7 +4,7 @@ import { sendEmail } from '@/lib/email'
 // ─── TYPES ──────────────────────────────────────────
 
 interface NotifyManagersOptions {
-  type: 'stock_alert' | 'field_visit'
+  type: 'stock_alert' | 'field_visit' | 'financial_alert'
   title: string
   subtitle: string
   href: string

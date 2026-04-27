@@ -1,6 +1,7 @@
 import { Roboto_Mono } from 'next/font/google';
 import './globals.css';
 import AuthProvider from '@/components/AuthProvider';
+import AlertToastProvider from '@/components/AlertToastProvider';
 
 const robotoMono = Roboto_Mono({ subsets: ['latin'], variable: '--font-roboto-mono', weight: ['300', '400', '500', '600', '700'] });
 
@@ -14,7 +15,9 @@ export default function RootLayout({ children }) {
     <html lang="en">
       <body suppressHydrationWarning className={`${robotoMono.variable} font-sans antialiased`}>
         <AuthProvider>
-          {children}
+          <AlertToastProvider>
+            {children}
+          </AlertToastProvider>
         </AuthProvider>
       </body>
     </html>

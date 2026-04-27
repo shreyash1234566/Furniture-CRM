@@ -6,6 +6,7 @@ const walkinFormSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   phone: z.string().min(10, 'Valid phone number required'),
   requirement: z.string().min(1, 'Please tell us what you are looking for'),
+  budget: z.string().optional(),
 })
 
 // POST /api/walkin — public, no auth required
@@ -21,7 +22,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const { name, phone, requirement } = parsed.data
+    const { name, phone, requirement, budget } = parsed.data
 
     // Find or create contact
     let contact = await prisma.contact.findFirst({ where: { phone } })
@@ -36,6 +37,7 @@ export async function POST(req: NextRequest) {
       data: {
         contactId: contact.id,
         requirement,
+        budget: budget || null,
         date: now,
         time: now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
         source: 'QR Walk-in',
@@ -54,9 +56,16 @@ export async function POST(req: NextRequest) {
 
 // GET /api/walkin — returns store info for the form header
 export async function GET() {
-  const settings = await prisma.storeSettings.findFirst({ where: { id: 1 } })
-  return NextResponse.json({
-    storeName: settings?.storeName || 'Furniture Store',
-    logo: settings?.logo || null,
-  })
+  try {
+    const settings = await prisma.storeSettings.findFirst({ where: { id: 1 } })
+    return NextResponse.json({
+      storeName: settings?.storeName || 'Furniture Store',
+      logo: settings?.logo || null,
+    })
+  } catch {
+    return NextResponse.json({
+      storeName: 'Furniture Store',
+      logo: null,
+    })
+  }
 }

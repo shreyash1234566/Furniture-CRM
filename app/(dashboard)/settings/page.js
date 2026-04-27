@@ -615,7 +615,7 @@ export default function SettingsPage() {
 
               {showInviteForm && (
                 <form onSubmit={handleInviteMember} className="mb-5 p-4 rounded-xl bg-surface border border-border space-y-3">
-                  <p className="text-xs text-muted">Add a team member and optionally assign login credentials. Username is used as email login.</p>
+                  <p className="text-xs text-muted">Add a team member and optionally assign login credentials. Username can be anything unique (e.g. <strong>rahul123</strong>) — no email required.</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-medium text-muted mb-1.5">Full Name</label>
@@ -662,12 +662,13 @@ export default function SettingsPage() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-muted mb-1.5">Login Username</label>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Login Username <span className="text-muted font-normal">(optional, e.g. rahul123)</span></label>
                       <input
-                        type="email"
+                        type="text"
                         value={inviteForm.loginUsername}
                         onChange={e => setInviteForm(prev => ({ ...prev, loginUsername: e.target.value }))}
-                        placeholder="username@example.com"
+                        placeholder="e.g. rahul123 or john.doe"
+                        autoComplete="off"
                         className="w-full"
                       />
                     </div>
@@ -739,9 +740,11 @@ export default function SettingsPage() {
                     <div>
                       <label className="block text-xs font-medium text-muted mb-1.5">Login Username</label>
                       <input
-                        type="email"
+                        type="text"
                         value={loginSetupForm.loginUsername}
                         onChange={e => setLoginSetupForm(prev => ({ ...prev, loginUsername: e.target.value }))}
+                        placeholder="e.g. rahul123 or john.doe"
+                        autoComplete="off"
                         required
                         className="w-full"
                       />
@@ -825,7 +828,7 @@ export default function SettingsPage() {
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-muted mb-1.5">Login Username</label>
-                      <input type="email" value={editForm.loginUsername} onChange={e => setEditForm(prev => ({ ...prev, loginUsername: e.target.value }))} placeholder="username@example.com" className="w-full" />
+                      <input type="text" value={editForm.loginUsername} onChange={e => setEditForm(prev => ({ ...prev, loginUsername: e.target.value }))} placeholder="e.g. rahul123" autoComplete="off" className="w-full" />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-muted mb-1.5">New Password (optional)</label>
@@ -1173,7 +1176,7 @@ export default function SettingsPage() {
                   {smtpForm.smtpHost === 'smtp.gmail.com' && (
                     <div className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/20 text-xs text-amber-700">
                       <strong>Gmail Setup:</strong> You need to use an <strong>App Password</strong>, not your regular password.
-                      Go to <em>Google Account → Security → 2-Step Verification → App Passwords</em>, generate one for "Mail", and paste it above.
+                      Go to <em>Google Account → Security → 2-Step Verification → App Passwords</em>, generate one for &quot;Mail&quot;, and paste it above.
                     </div>
                   )}
 

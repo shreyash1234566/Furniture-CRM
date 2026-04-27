@@ -1021,6 +1021,7 @@ model PurchaseOrder {
   updatedAt    DateTime @updatedAt
 
   items           PurchaseOrderItem[]
+  payments        PurchasePayment[]
   purchaseReturns PurchaseReturn[]
 
   @@index([supplierId])
@@ -1076,6 +1077,22 @@ model PurchaseReturnItem {
   unitCost  Int
 
   @@index([returnId])
+}
+
+model PurchasePayment {
+  id        Int           @id @default(autoincrement())
+  poId      Int
+  po        PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+  amount    Int
+  method    String        @default("Bank Transfer") // Cash, UPI, Card, Bank Transfer, Cheque
+  reference String?
+  notes     String?
+  paidAt    DateTime      @default(now())
+  createdBy String?
+  createdAt DateTime      @default(now())
+
+  @@index([poId])
+  @@index([paidAt])
 }
 
 // ─── MODULE 2: MULTI-BRANCH / GODOWN ────────────────

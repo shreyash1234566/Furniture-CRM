@@ -3,8 +3,8 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Search, Truck, Package, Clock, DollarSign,
-  RefreshCw, Link2, Unlink, ExternalLink, ShoppingBag, Store,
-  Globe, Plus, Printer, Download, Settings2, X, Edit3, Check
+  RefreshCw, Plus, Printer, X, Settings2, Edit3, Check,
+  Store, Unlink, Link2, ExternalLink, Download,
 } from 'lucide-react';
 import { getOrders, createOrder } from '@/app/actions/orders';
 import { getMarketplaceChannels } from '@/app/actions/settings';
@@ -15,7 +15,7 @@ import ReturningCustomerCard from '@/components/ReturningCustomerCard';
 import { searchContacts, getCustomerProfile } from '@/app/actions/invoices';
 
 const orderStatuses = ['All', 'Confirmed', 'Processing', 'Shipped', 'Delivered', 'Cancelled'];
-const orderSources = ['All', 'Store', 'Amazon', 'Flipkart', 'Shopify'];
+const orderSources = ['All', 'Store', 'Shopify'];
 
 const statusColors = {
   Confirmed: 'bg-info-light text-info',
@@ -33,8 +33,6 @@ const paymentColors = {
 
 const sourceConfig = {
   Store: { color: '#f59e0b', bg: 'bg-amber-500/10 text-amber-700 border-amber-500/20' },
-  Amazon: { color: '#FF9900', bg: 'bg-orange-500/10 text-orange-300 border-orange-500/20' },
-  Flipkart: { color: '#2874F0', bg: 'bg-blue-500/10 text-blue-700 border-blue-500/20' },
   Shopify: { color: '#96BF48', bg: 'bg-green-500/10 text-green-700 border-green-500/20' },
 };
 
@@ -48,6 +46,20 @@ const DEFAULT_SLIP_TEMPLATE = {
   showDate: true,
   showCustomerPhone: true,
 };
+
+function getInitialSlipTemplate() {
+  if (typeof window === 'undefined') return DEFAULT_SLIP_TEMPLATE;
+
+  try {
+    const saved = window.localStorage.getItem('packagingSlipTemplate');
+    if (!saved) return DEFAULT_SLIP_TEMPLATE;
+
+    const parsed = JSON.parse(saved);
+    return { ...DEFAULT_SLIP_TEMPLATE, ...parsed };
+  } catch {
+    return DEFAULT_SLIP_TEMPLATE;
+  }
+}
 
 export default function OrdersPage() {
   const [orders, setOrders] = useState([]);
@@ -73,7 +85,7 @@ export default function OrdersPage() {
   // Packaging slip state
   const [slipOrder, setSlipOrder] = useState(null);
   const [showSlipModal, setShowSlipModal] = useState(false);
-  const [slipTemplate, setSlipTemplate] = useState(DEFAULT_SLIP_TEMPLATE);
+  const [slipTemplate, setSlipTemplate] = useState(() => getInitialSlipTemplate());
   const [editingTemplate, setEditingTemplate] = useState(false);
   const [tempTemplate, setTempTemplate] = useState(DEFAULT_SLIP_TEMPLATE);
   const slipRef = useRef(null);
@@ -100,17 +112,6 @@ export default function OrdersPage() {
     setOrderCustomerProfile(null);
     setSelectedGodownId(defaultGodown ? String(defaultGodown.id) : '');
   };
-
-  // Load slip template from localStorage
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('packagingSlipTemplate');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        setSlipTemplate({ ...DEFAULT_SLIP_TEMPLATE, ...parsed });
-      }
-    } catch {}
-  }, []);
 
   // Load JsBarcode script once, then render barcodes when slip opens
   useEffect(() => {
@@ -225,21 +226,6 @@ export default function OrdersPage() {
 
   const totalRevenue = orders.filter(o => o.payment === 'Paid').reduce((s, o) => s + o.amount, 0);
   const pendingPayment = orders.filter(o => o.payment !== 'Paid').reduce((s, o) => s + o.amount, 0);
-  const marketplaceOrders = orders.filter(o => o.source !== 'Store').length;
-
-  // Per-source stats
-  const sourceStats = useMemo(() => {
-    const stats = {};
-    orderSources.filter(s => s !== 'All').forEach(source => {
-      const sourceOrders = orders.filter(o => o.source === source);
-      stats[source] = {
-        count: sourceOrders.length,
-        revenue: sourceOrders.filter(o => o.payment === 'Paid').reduce((s, o) => s + o.amount, 0),
-        pending: sourceOrders.filter(o => o.status !== 'Delivered' && o.status !== 'Cancelled').length,
-      };
-    });
-    return stats;
-  }, [orders]);
 
   if (loading) {
     return (
@@ -320,25 +306,15 @@ export default function OrdersPage() {
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-xl md:text-2xl font-bold text-foreground">Orders</h1>
-          <p className="text-xs md:text-sm text-muted mt-1">{orders.length} orders · ₹{(totalRevenue/1000).toFixed(0)}K collected · {marketplaceOrders} from marketplaces</p>
+          <p className="text-xs md:text-sm text-muted mt-1">{orders.length} orders · ₹{(totalRevenue/1000).toFixed(0)}K collected</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => { resetOfflineOrderForm(); setShowCreateModal(true); }} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
             <Plus className="w-4 h-4" /> New Offline Order
           </button>
-          <button onClick={handleSyncAll} className="flex items-center gap-2 px-4 py-2.5 bg-surface border border-border hover:border-accent/30 text-foreground rounded-xl text-sm font-semibold transition-all">
-            <RefreshCw className={`w-4 h-4 ${Object.values(syncing).some(Boolean) ? 'animate-spin' : ''}`} /> Sync All
-          </button>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex bg-surface rounded-xl border border-border p-0.5 w-fit">
-        <button onClick={() => setTab('orders')} className={`px-5 py-2 rounded-lg text-sm font-medium transition-all ${tab === 'orders' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>Orders</button>
-        <button onClick={() => setTab('channels')} className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${tab === 'channels' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
-          <Globe className="w-3.5 h-3.5" /> Channels
-        </button>
-      </div>
 
       {/* ─── ORDERS TAB ─── */}
       {tab === 'orders' && (
@@ -361,10 +337,6 @@ export default function OrdersPage() {
               <div className="p-2.5 rounded-xl bg-warning-light"><Clock className="w-5 h-5 text-warning" /></div>
               <div><p className="text-xs text-muted">Pending Payment</p><p className="text-lg font-bold text-warning">₹{(pendingPayment/1000).toFixed(0)}K</p></div>
             </div>
-            <div className="glass-card p-4 flex items-center gap-3 min-w-[160px] flex-shrink-0">
-              <div className="p-2.5 rounded-xl bg-blue-500/10"><ShoppingBag className="w-5 h-5 text-blue-700" /></div>
-              <div><p className="text-xs text-muted">Marketplace</p><p className="text-lg font-bold text-blue-700">{marketplaceOrders}</p></div>
-            </div>
           </div>
 
           {/* Filters */}
@@ -382,7 +354,7 @@ export default function OrdersPage() {
                 <span className="text-[10px] uppercase tracking-wider text-muted font-semibold flex-shrink-0">Source</span>
                 <div className="flex gap-1">
                   {orderSources.map(s => (
-                    <button key={s} onClick={() => setSourceFilter(s)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 flex-shrink-0 ${sourceFilter === s ? 'bg-accent text-white shadow-sm' : 'text-muted hover:text-foreground hover:bg-surface-hover border border-transparent hover:border-border'}`}>
+                    <button key={s} onClick={() => { setSourceFilter(s); setStatusFilter('All'); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 flex-shrink-0 ${sourceFilter === s && statusFilter === 'All' ? 'bg-accent text-white shadow-sm' : 'text-muted hover:text-foreground hover:bg-surface-hover border border-transparent hover:border-border'}`}>
                       {s !== 'All' && <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: sourceConfig[s]?.color }} />}
                       {s}
                     </button>
@@ -395,7 +367,7 @@ export default function OrdersPage() {
                 <span className="text-[10px] uppercase tracking-wider text-muted font-semibold flex-shrink-0">Status</span>
                 <div className="flex gap-1">
                   {orderStatuses.filter(s => s !== 'All').map(s => (
-                    <button key={s} onClick={() => setStatusFilter(statusFilter === s ? 'All' : s)}
+                    <button key={s} onClick={() => { setStatusFilter(statusFilter === s ? 'All' : s); setSourceFilter('All'); }}
                       className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${statusFilter === s ? 'bg-accent text-white shadow-sm' : 'text-muted hover:text-foreground hover:bg-surface-hover border border-transparent hover:border-border'}`}>
                       {s}
                     </button>
@@ -405,8 +377,41 @@ export default function OrdersPage() {
             </div>
           </div>
 
-          {/* Orders Table */}
-          <div className="glass-card overflow-hidden">
+          {/* ── Mobile Card View ── */}
+          <div className="md:hidden space-y-2">
+            {filtered.length === 0 ? (
+              <div className="text-center py-10 text-muted text-sm glass-card">No orders match your filters</div>
+            ) : filtered.map(order => (
+              <div key={order.id} className="glass-card p-4 active:scale-[0.99] transition-transform">
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-foreground truncate">{order.customer}</p>
+                    <p className="text-xs text-muted truncate">{order.product} · Qty {order.quantity}</p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                    <span className={`badge ${statusColors[order.status]}`}>{order.status}</span>
+                    <span className={`badge ${paymentColors[order.payment]}`}>{order.payment}</span>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between mt-2 pt-2 border-t border-border">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[10px] text-muted">{order.id}</span>
+                    {getSourceBadge(order.source)}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-foreground">₹{order.amount.toLocaleString()}</span>
+                    <button onClick={() => openSlipModal(order)} title="Print Packaging Slip"
+                      className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-surface border border-border text-muted hover:text-accent hover:border-accent/40 transition-all">
+                      <Printer className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* ── Desktop Table View ── */}
+          <div className="hidden md:block glass-card overflow-hidden">
             <div className="overflow-x-auto">
             <table className="crm-table">
               <thead>
@@ -553,7 +558,7 @@ export default function OrdersPage() {
                       {channel.connected ? <><Unlink className="w-3.5 h-3.5" /> Disconnect</> : <><Link2 className="w-3.5 h-3.5" /> Connect</>}
                     </button>
                     <button
-                      onClick={() => { setTab('orders'); setSourceFilter(channel.name); }}
+                      onClick={() => { setTab('orders'); setSourceFilter(channel.name); setStatusFilter('All'); }}
                       className="flex items-center justify-center gap-1 px-3 py-2 bg-surface border border-border rounded-lg text-xs font-medium text-muted hover:text-foreground hover:border-accent/30 transition-all"
                       title="View orders"
                     >

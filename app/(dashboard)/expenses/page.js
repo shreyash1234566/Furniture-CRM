@@ -55,6 +55,11 @@ export default function ExpensesPage() {
   const [dateRange, setDateRange] = useState({ from: startOfMonth(), to: today() });
   const [selectedMonth, setSelectedMonth] = useState(monthStr());
 
+  // Per-tab loading states
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [budgetLoading, setBudgetLoading] = useState(false);
+  const [cashSaving, setCashSaving] = useState(false);
+
   // Modals
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [showAddCategory, setShowAddCategory] = useState(false);
@@ -62,6 +67,7 @@ export default function ExpensesPage() {
   const [showBudgetEdit, setShowBudgetEdit] = useState(null); // categoryId
   const [budgetVal, setBudgetVal] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  const [cashSaved, setCashSaved] = useState(false);
 
   // New expense form
   const [expForm, setExpForm] = useState({
@@ -80,12 +86,12 @@ export default function ExpensesPage() {
 
   // ─── DATA LOADING ──────────────────────────────
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (from = dateRange.from, to = dateRange.to) => {
     setLoading(true);
     try {
       const [catRes, expRes, recRes, cashRes] = await Promise.all([
         getExpenseCategories(),
-        getExpenses(dateRange.from, dateRange.to),
+        getExpenses(from, to),
         getRecurringExpenses(),
         getCashRegister(today()),
       ]);
@@ -105,17 +111,26 @@ export default function ExpensesPage() {
     } finally {
       setLoading(false);
     }
-  }, [dateRange]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);  // intentionally empty - called with explicit args when needed
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { loadData(dateRange.from, dateRange.to); }, []);
+  // Re-run loadData when Load button is clicked (handled by passing args) or on initial mount
 
-  // Load summary when tab changes to analytics
+  // Load summary when tab changes to analytics/budget, with loading states
   useEffect(() => {
     if (tab === 'analytics') {
-      getExpenseSummary(dateRange.from, dateRange.to).then(r => { if (r.success) setSummary(r.data); });
+      setSummary(null); // clear stale data
+      setAnalyticsLoading(true);
+      getExpenseSummary(dateRange.from, dateRange.to)
+        .then(r => { if (r.success) setSummary(r.data); })
+        .finally(() => setAnalyticsLoading(false));
     }
     if (tab === 'budget') {
-      getBudgetVsActual(selectedMonth).then(r => { if (r.success) setBudgetData(r.data); });
+      setBudgetLoading(true);
+      getBudgetVsActual(selectedMonth)
+        .then(r => { if (r.success) setBudgetData(r.data); })
+        .finally(() => setBudgetLoading(false));
     }
   }, [tab, dateRange, selectedMonth]);
 
@@ -147,7 +162,17 @@ export default function ExpensesPage() {
     if (res.success) {
       setShowAddExpense(false);
       setExpForm({ date: today(), categoryId: '', amount: '', description: '', paymentMode: 'Cash', reference: '', vendor: '', notes: '' });
-      await loadData();
+      await loadData(dateRange.from, dateRange.to);
+      // Refresh analytics/budget if they were loaded
+      if (summary) {
+        setAnalyticsLoading(true);
+        getExpenseSummary(dateRange.from, dateRange.to)
+          .then(r => { if (r.success) setSummary(r.data); })
+          .finally(() => setAnalyticsLoading(false));
+      }
+      if (budgetData.length > 0) {
+        getBudgetVsActual(selectedMonth).then(r => { if (r.success) setBudgetData(r.data); });
+      }
     } else {
       alert(res.error || 'Failed');
     }
@@ -157,7 +182,17 @@ export default function ExpensesPage() {
   const handleDeleteExpense = async (id) => {
     if (!confirm('Delete this expense?')) return;
     await deleteExpense(id);
-    await loadData();
+    await loadData(dateRange.from, dateRange.to);
+    // Refresh analytics/budget if they were loaded
+    if (summary) {
+      setAnalyticsLoading(true);
+      getExpenseSummary(dateRange.from, dateRange.to)
+        .then(r => { if (r.success) setSummary(r.data); })
+        .finally(() => setAnalyticsLoading(false));
+    }
+    if (budgetData.length > 0) {
+      getBudgetVsActual(selectedMonth).then(r => { if (r.success) setBudgetData(r.data); });
+    }
   };
 
   const handleAddCategory = async () => {
@@ -171,7 +206,7 @@ export default function ExpensesPage() {
     if (res.success) {
       setShowAddCategory(false);
       setCatForm({ name: '', color: '#6366F1', budget: '' });
-      await loadData();
+      await loadData(dateRange.from, dateRange.to);
     } else {
       alert(res.error || 'Failed');
     }
@@ -182,7 +217,7 @@ export default function ExpensesPage() {
     if (showBudgetEdit) {
       await updateCategoryBudget(showBudgetEdit, budgetVal);
       setShowBudgetEdit(null);
-      await loadData();
+      await loadData(dateRange.from, dateRange.to);
       if (tab === 'budget') {
         const r = await getBudgetVsActual(selectedMonth);
         if (r.success) setBudgetData(r.data);
@@ -202,7 +237,7 @@ export default function ExpensesPage() {
     if (res.success) {
       setShowAddRecurring(false);
       setRecForm({ categoryId: '', description: '', amount: '', paymentMode: 'Bank Transfer', vendor: '', frequency: 'Monthly', dayOfMonth: '1', notes: '' });
-      await loadData();
+      await loadData(dateRange.from, dateRange.to);
     } else {
       alert(res.error || 'Failed');
     }
@@ -211,13 +246,21 @@ export default function ExpensesPage() {
 
   const handleSaveCashRegister = async () => {
     if (!cashReg) return;
-    await updateCashRegister({
+    setCashSaving(true);
+    const res = await updateCashRegister({
       date: todayStr,
       openingCash: cashReg.openingCash,
       closingCash: cashReg.closingCash,
       cashIn: cashReg.cashIn,
       notes: cashReg.notes,
     });
+    setCashSaving(false);
+    if (res.success) {
+      setCashSaved(true);
+      setTimeout(() => setCashSaved(false), 3000);
+    } else {
+      alert(res.error || 'Failed to save cash register');
+    }
   };
 
   const handleExportCSV = () => {
@@ -453,7 +496,7 @@ export default function ExpensesPage() {
                   onChange={e => setDateRange(d => ({ ...d, to: e.target.value }))}
                   className="px-3 py-2 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
               </div>
-              <button onClick={loadData} className="px-3 py-2 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-medium transition-all flex items-center gap-1.5">
+              <button onClick={() => loadData(dateRange.from, dateRange.to)} className="px-3 py-2 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-medium transition-all flex items-center gap-1.5">
                 <RefreshCw className="w-3.5 h-3.5" /> Load
               </button>
               <div className="flex-1" />
@@ -535,7 +578,20 @@ export default function ExpensesPage() {
       )}
 
       {/* ═══════ ANALYTICS TAB ═══════ */}
-      {tab === 'analytics' && summary && (
+      {tab === 'analytics' && analyticsLoading && (
+        <div className="glass-card py-16 text-center text-muted">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent mx-auto mb-3" />
+          <p className="text-sm">Loading analytics...</p>
+        </div>
+      )}
+      {tab === 'analytics' && !analyticsLoading && !summary && (
+        <div className="glass-card py-16 text-center text-muted">
+          <PieChart className="w-12 h-12 mx-auto mb-3 opacity-20" />
+          <p className="font-medium">No expense data for this period</p>
+          <p className="text-sm mt-1">Add some expenses first or adjust the date range in the All Expenses tab</p>
+        </div>
+      )}
+      {tab === 'analytics' && !analyticsLoading && summary && (
         <div className="space-y-4">
           {/* Top-line KPIs */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -552,9 +608,9 @@ export default function ExpensesPage() {
               <p className="text-xl font-bold text-accent">{formatCurrency(summary.totalBudget)}</p>
             </div>
             <div className="glass-card p-4 text-center">
-              <p className="text-xs text-muted mb-1">{summary.dayCount} Days</p>
-              <p className="text-xl font-bold text-foreground">{formatCurrency(summary.grandTotal)}</p>
-              <p className="text-[10px] text-muted">over period</p>
+              <p className="text-xs text-muted mb-1">Top Category</p>
+              <p className="text-sm font-bold text-foreground truncate">{summary.categoryBreakdown[0]?.categoryName || '—'}</p>
+              <p className="text-[10px] text-muted mt-0.5">{formatCurrency(summary.categoryBreakdown[0]?.total || 0)} spent</p>
             </div>
           </div>
 
@@ -663,7 +719,13 @@ export default function ExpensesPage() {
       )}
 
       {/* ═══════ BUDGET VS ACTUAL TAB ═══════ */}
-      {tab === 'budget' && (
+      {tab === 'budget' && budgetLoading && (
+        <div className="glass-card py-16 text-center text-muted">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent mx-auto mb-3" />
+          <p className="text-sm">Loading budget data...</p>
+        </div>
+      )}
+      {tab === 'budget' && !budgetLoading && (
         <div className="space-y-4">
           <div className="flex items-center gap-3">
             <input type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}
@@ -786,11 +848,11 @@ export default function ExpensesPage() {
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button onClick={async () => { await toggleRecurringExpense(rec.id); await loadData(); }}
+                    <button onClick={async () => { await toggleRecurringExpense(rec.id); await loadData(dateRange.from, dateRange.to); }}
                       className="flex-1 py-1.5 text-xs font-medium rounded-lg border border-border hover:border-accent/30 text-muted hover:text-foreground transition-all text-center">
                       {rec.isActive ? 'Pause' : 'Resume'}
                     </button>
-                    <button onClick={async () => { if (confirm('Delete?')) { await deleteRecurringExpense(rec.id); await loadData(); } }}
+                    <button onClick={async () => { if (confirm('Delete?')) { await deleteRecurringExpense(rec.id); await loadData(dateRange.from, dateRange.to); } }}
                       className="py-1.5 px-3 text-xs font-medium rounded-lg bg-red-500/10 text-red-600 hover:bg-red-500/20 transition-all">
                       Delete
                     </button>
@@ -803,6 +865,12 @@ export default function ExpensesPage() {
       )}
 
       {/* ═══════ CASH REGISTER TAB ═══════ */}
+      {tab === 'cash' && !cashReg && (
+        <div className="glass-card py-16 text-center text-muted">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent mx-auto mb-3" />
+          <p className="text-sm">Loading cash register...</p>
+        </div>
+      )}
       {tab === 'cash' && cashReg && (
         <div className="space-y-4">
           <div className="glass-card p-6">
@@ -871,10 +939,18 @@ export default function ExpensesPage() {
                 </div>
               );
             })()}
-            <button onClick={handleSaveCashRegister}
-              className="px-5 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all flex items-center gap-2">
-              <Check className="w-4 h-4" /> Save Register
-            </button>
+            <div className="flex items-center gap-3">
+              <button onClick={handleSaveCashRegister} disabled={cashSaving}
+                className="px-5 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all flex items-center gap-2 disabled:opacity-60">
+                {cashSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                {cashSaving ? 'Saving...' : 'Save Register'}
+              </button>
+              {cashSaved && (
+                <span className="flex items-center gap-1.5 text-sm text-green-600 font-medium">
+                  <CheckCircle2 className="w-4 h-4" /> Saved successfully!
+                </span>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -912,7 +988,7 @@ export default function ExpensesPage() {
                         const actionLabel = cat._count.expenses > 0 || cat.isDefault ? 'archive' : 'delete'
                         if (confirm(`Are you sure you want to ${actionLabel} "${cat.name}"?`)) {
                           await deleteExpenseCategory(cat.id)
-                          await loadData()
+                          await loadData(dateRange.from, dateRange.to)
                         }
                       }}
                       className="p-1.5 text-muted hover:text-red-600 rounded-lg hover:bg-surface transition-colors"

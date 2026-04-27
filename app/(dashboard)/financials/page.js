@@ -9,6 +9,7 @@ import {
 import {
   seedChartOfAccounts, getAccounts, createAccount,
   getProfitAndLoss, getBalanceSheet, getCashFlow,
+  getExecutiveSummary,
   getTrialBalance, getReceivablesAging, getPayablesAging,
   getJournalEntries, createManualJournal, voidJournalEntry,
 } from '@/app/actions/financials'
@@ -68,10 +69,19 @@ export default function FinancialsPage() {
   const [pnlData, setPnlData] = useState(null)
   const [bsData, setBsData] = useState(null)
   const [cfData, setCfData] = useState(null)
+  const [execData, setExecData] = useState(null)
   const [tbData, setTbData] = useState(null)
   const [recAging, setRecAging] = useState(null)
   const [payAging, setPayAging] = useState(null)
-  const [reportLoading, setReportLoading] = useState(false)
+  // Per-section loading states (prevents race conditions when overview loads multiple at once)
+  const [pnlLoading, setPnlLoading] = useState(false)
+  const [bsLoading, setBsLoading] = useState(false)
+  const [cfLoading, setCfLoading] = useState(false)
+  const [tbLoading, setTbLoading] = useState(false)
+  const [agingLoading, setAgingLoading] = useState(false)
+  const [execLoading, setExecLoading] = useState(false)
+  const [overviewLoading, setOverviewLoading] = useState(false)
+  const reportLoading = pnlLoading || bsLoading || cfLoading || tbLoading || agingLoading || execLoading
 
   // Journal state
   const [showJournalModal, setShowJournalModal] = useState(false)
@@ -118,44 +128,53 @@ export default function FinancialsPage() {
 
   // ── Report fetchers ────────────────────────────────
 
-  const fetchPnL = useCallback(async () => {
-    setReportLoading(true)
+  const fetchPnL = useCallback(async (silent = false) => {
+    setPnlLoading(true)
     const res = await getProfitAndLoss(fromDate, toDate, compareEnabled ? compareFrom : undefined, compareEnabled ? compareTo : undefined)
     if (res.success) setPnlData(res.data)
-    else alert(res.error)
-    setReportLoading(false)
+    else if (!silent) alert(res.error)
+    setPnlLoading(false)
   }, [fromDate, toDate, compareEnabled, compareFrom, compareTo])
 
-  const fetchBS = useCallback(async () => {
-    setReportLoading(true)
+  const fetchBS = useCallback(async (silent = false) => {
+    setBsLoading(true)
     const res = await getBalanceSheet(asOfDate)
     if (res.success) setBsData(res.data)
-    else alert(res.error)
-    setReportLoading(false)
+    else if (!silent) alert(res.error)
+    setBsLoading(false)
   }, [asOfDate])
 
-  const fetchCF = useCallback(async () => {
-    setReportLoading(true)
+  const fetchCF = useCallback(async (silent = false) => {
+    setCfLoading(true)
     const res = await getCashFlow(fromDate, toDate)
     if (res.success) setCfData(res.data)
-    else alert(res.error)
-    setReportLoading(false)
+    else if (!silent) alert(res.error)
+    setCfLoading(false)
   }, [fromDate, toDate])
 
-  const fetchTB = useCallback(async () => {
-    setReportLoading(true)
+  const fetchExecutive = useCallback(async (silent = false) => {
+    setExecLoading(true)
+    const res = await getExecutiveSummary(fromDate, toDate)
+    if (res.success) setExecData(res.data)
+    else if (!silent) alert(res.error)
+    setExecLoading(false)
+  }, [fromDate, toDate])
+
+  const fetchTB = useCallback(async (silent = false) => {
+    setTbLoading(true)
     const res = await getTrialBalance(asOfDate)
     if (res.success) setTbData(res.data)
-    else alert(res.error)
-    setReportLoading(false)
+    else if (!silent) alert(res.error)
+    setTbLoading(false)
   }, [asOfDate])
 
-  const fetchAging = useCallback(async () => {
-    setReportLoading(true)
+  const fetchAging = useCallback(async (silent = false) => {
+    setAgingLoading(true)
     const [recRes, payRes] = await Promise.all([getReceivablesAging(), getPayablesAging()])
     if (recRes.success) setRecAging(recRes.data)
+    else if (!silent) alert(recRes.error)
     if (payRes.success) setPayAging(payRes.data)
-    setReportLoading(false)
+    setAgingLoading(false)
   }, [])
 
   const fetchJournals = useCallback(async () => {
@@ -166,15 +185,22 @@ export default function FinancialsPage() {
   // Auto-load when switching tabs
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (tab === 'aging' && !recAging) void fetchAging()
-      if (tab === 'trialbalance' && !tbData) void fetchTB()
-      if (tab === 'pnl' && !pnlData) void fetchPnL()
-      if (tab === 'bs' && !bsData) void fetchBS()
-      if (tab === 'cf' && !cfData) void fetchCF()
+      // Overview: auto-load P&L and Balance Sheet for the summary cards
+      if (tab === 'overview') {
+        if (!pnlData) void fetchPnL(true)
+        if (!bsData) void fetchBS(true)
+        if (!recAging) void fetchAging(true)
+      }
+      if (tab === 'aging' && !recAging) void fetchAging(true)
+      if (tab === 'trialbalance' && !tbData) void fetchTB(true)
+      if (tab === 'executive' && !execData) void fetchExecutive(true)
+      if (tab === 'pnl' && !pnlData) void fetchPnL(true)
+      if (tab === 'bs' && !bsData) void fetchBS(true)
+      if (tab === 'cf' && !cfData) void fetchCF(true)
     }, 0)
 
     return () => clearTimeout(timer)
-  }, [tab, recAging, tbData, pnlData, bsData, cfData, fetchAging, fetchTB, fetchPnL, fetchBS, fetchCF])
+  }, [tab, recAging, tbData, execData, pnlData, bsData, cfData, fetchAging, fetchTB, fetchExecutive, fetchPnL, fetchBS, fetchCF])
 
   // ── Journal actions ────────────────────────────────
 
@@ -226,6 +252,7 @@ export default function FinancialsPage() {
 
   const tabs = [
     { id: 'overview', label: 'Overview', icon: BarChart3 },
+    { id: 'executive', label: 'Executive Summary', icon: TrendingUp },
     { id: 'pnl', label: 'P&L', icon: TrendingUp },
     { id: 'bs', label: 'Balance Sheet', icon: FileText },
     { id: 'cf', label: 'Cash Flow', icon: RefreshCw },
@@ -240,7 +267,27 @@ export default function FinancialsPage() {
   // ── OVERVIEW ──────────────────────────────────────
   const renderOverview = () => (
     <div className="space-y-6">
-      <p className="text-sm text-muted">Quick snapshot — generate individual reports for full details.</p>
+      {/* Header row with Refresh button */}
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted">Key financial indicators for the current financial year</p>
+        <button
+          onClick={async () => {
+            setOverviewLoading(true)
+            await Promise.all([fetchPnL(true), fetchBS(true), fetchAging(true)])
+            setOverviewLoading(false)
+          }}
+          disabled={overviewLoading}
+          className="px-3 py-1.5 bg-surface border border-border text-xs text-muted rounded-lg hover:text-foreground hover:bg-surface-hover flex items-center gap-1.5 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${overviewLoading ? 'animate-spin' : ''}`} /> Refresh Overview
+        </button>
+      </div>
+      {(overviewLoading || pnlLoading || bsLoading || agingLoading) && (
+        <div className="flex items-center gap-2 text-xs text-muted">
+          <div className="animate-spin rounded-full h-3 w-3 border-b border-accent" />
+          Loading financial data...
+        </div>
+      )}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           { label: 'Accounts Receivable', value: bsData?.currentAssets?.accountsReceivable, color: 'text-amber-400', action: () => { setTab('aging') } },
@@ -267,6 +314,29 @@ export default function FinancialsPage() {
             </p>
           </div>
         ))}
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="glass-card p-4">
+          <p className="text-xs text-muted mb-1">Receivables 90+ Risk</p>
+          <p className={`text-xl font-bold ${(recAging?.risk?.over90SharePct || 0) > 25 ? 'text-red-400' : 'text-amber-400'}`}>
+            {recAging?.risk ? fmtPct(recAging.risk.over90SharePct) : '—'}
+          </p>
+          <p className="text-xs text-muted mt-1">Share of receivables older than 90 days</p>
+        </div>
+        <div className="glass-card p-4">
+          <p className="text-xs text-muted mb-1">Payables 90+ Risk</p>
+          <p className={`text-xl font-bold ${(payAging?.risk?.over90SharePct || 0) > 25 ? 'text-red-400' : 'text-amber-400'}`}>
+            {payAging?.risk ? fmtPct(payAging.risk.over90SharePct) : '—'}
+          </p>
+          <p className="text-xs text-muted mt-1">Share of payables older than 90 days</p>
+        </div>
+        <div className="glass-card p-4">
+          <p className="text-xs text-muted mb-1">Cashflow Data Confidence</p>
+          <p className={`text-xl font-bold ${(cfData?.quality?.purchasePayments?.fallbackAmount || 0) > 0 ? 'text-yellow-400' : 'text-emerald-400'}`}>
+            {cfData ? ((cfData.quality?.purchasePayments?.paymentRows || 0) > 0 ? 'High' : 'Low') : '—'}
+          </p>
+          <p className="text-xs text-muted mt-1">Supplier payments captured as event rows</p>
+        </div>
       </div>
       <div className="glass-card p-4 space-y-2">
         <p className="text-sm font-medium text-foreground mb-3">Quick Actions</p>
@@ -335,8 +405,8 @@ export default function FinancialsPage() {
               </div>
             </>
           )}
-          <button onClick={fetchPnL} disabled={reportLoading} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50 flex items-center gap-2">
-            {reportLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />} Generate
+          <button onClick={fetchPnL} disabled={pnlLoading} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50 flex items-center gap-2">
+            {pnlLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />} Generate
           </button>
           {cur && <button onClick={handlePrint} className="px-4 py-2 bg-surface border border-border text-sm text-foreground rounded-lg hover:bg-surface-hover flex items-center gap-2"><Printer className="w-4 h-4" /> Print</button>}
         </div>
@@ -414,8 +484,8 @@ export default function FinancialsPage() {
           <label className="text-xs text-muted mb-1 block">As of Date</label>
           <input type="date" value={asOfDate} onChange={e => setAsOfDate(e.target.value)} className="px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
         </div>
-        <button onClick={fetchBS} disabled={reportLoading} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50 flex items-center gap-2">
-          {reportLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />} Generate
+        <button onClick={fetchBS} disabled={bsLoading} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50 flex items-center gap-2">
+          {bsLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />} Generate
         </button>
         {bsData && <button onClick={handlePrint} className="px-4 py-2 bg-surface border border-border text-sm text-foreground rounded-lg hover:bg-surface-hover flex items-center gap-2"><Printer className="w-4 h-4" /> Print</button>}
       </div>
@@ -496,8 +566,8 @@ export default function FinancialsPage() {
           <label className="text-xs text-muted mb-1 block">To</label>
           <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
         </div>
-        <button onClick={fetchCF} disabled={reportLoading} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50 flex items-center gap-2">
-          {reportLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />} Generate
+        <button onClick={fetchCF} disabled={cfLoading} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50 flex items-center gap-2">
+          {cfLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />} Generate
         </button>
         {cfData && <button onClick={handlePrint} className="px-4 py-2 bg-surface border border-border text-sm text-foreground rounded-lg hover:bg-surface-hover flex items-center gap-2"><Printer className="w-4 h-4" /> Print</button>}
       </div>
@@ -551,6 +621,63 @@ export default function FinancialsPage() {
               <span className={`text-2xl font-bold ${cfData.netCashFlow >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{fmtSigned(cfData.netCashFlow)}</span>
             </div>
           </div>
+
+          {cfData.quality?.purchasePayments && (
+            <div className="text-xs text-muted border-t border-border pt-3 space-y-1">
+              <p>
+                Supplier payout events: {fmt(cfData.quality.purchasePayments.eventBasedAmount)} across
+                {` `}{cfData.quality.purchasePayments.paymentRows} payment rows.
+              </p>
+              <p>{cfData.quality.purchasePayments.note}</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+
+  const renderExecutive = () => (
+    <div className="space-y-4">
+      <div className="flex items-end gap-4 flex-wrap">
+        <div>
+          <label className="text-xs text-muted mb-1 block">From</label>
+          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
+        </div>
+        <div>
+          <label className="text-xs text-muted mb-1 block">To</label>
+          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
+        </div>
+        <button onClick={fetchExecutive} disabled={execLoading} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50 flex items-center gap-2">
+          {execLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <TrendingUp className="w-4 h-4" />} Generate
+        </button>
+      </div>
+
+      {execData && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="glass-card p-4"><p className="text-xs text-muted">Current Ratio</p><p className="text-xl font-bold text-blue-400">{execData.liquidity.currentRatio !== null ? execData.liquidity.currentRatio.toFixed(2) : '—'}</p></div>
+            <div className="glass-card p-4"><p className="text-xs text-muted">DSO</p><p className="text-xl font-bold text-amber-400">{execData.cycle.dso !== null ? `${execData.cycle.dso.toFixed(1)}d` : '—'}</p></div>
+            <div className="glass-card p-4"><p className="text-xs text-muted">DPO</p><p className="text-xl font-bold text-purple-400">{execData.cycle.dpo !== null ? `${execData.cycle.dpo.toFixed(1)}d` : '—'}</p></div>
+            <div className="glass-card p-4"><p className="text-xs text-muted">Cash Runway</p><p className="text-xl font-bold text-emerald-400">{execData.liquidity.cashRunwayDays !== null ? `${execData.liquidity.cashRunwayDays.toFixed(1)}d` : '—'}</p></div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="glass-card p-4"><p className="text-xs text-muted">Net Profit</p><p className={`text-xl font-bold ${(execData.performance.netProfit || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{fmtSigned(execData.performance.netProfit)}</p></div>
+            <div className="glass-card p-4"><p className="text-xs text-muted">Net Margin Change</p><p className={`text-xl font-bold ${(execData.performance.netMarginDeltaPct || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{(execData.performance.netMarginDeltaPct || 0).toFixed(1)}pp</p></div>
+            <div className="glass-card p-4"><p className="text-xs text-muted">Gross Margin Change</p><p className={`text-xl font-bold ${(execData.performance.grossMarginDeltaPct || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{(execData.performance.grossMarginDeltaPct || 0).toFixed(1)}pp</p></div>
+          </div>
+
+          <div className="glass-card p-4">
+            <p className="text-sm font-medium text-foreground mb-2">Period Alerts</p>
+            {execData.alerts?.length ? (
+              <ul className="space-y-1 text-sm text-amber-300">
+                {execData.alerts.map((a, idx) => <li key={idx}>• {a}</li>)}
+              </ul>
+            ) : (
+              <p className="text-sm text-emerald-400">No major anomalies detected in this period.</p>
+            )}
+            <p className="text-xs text-muted mt-2">{execData.benchmarkNote}</p>
+          </div>
         </div>
       )}
     </div>
@@ -564,8 +691,8 @@ export default function FinancialsPage() {
           <label className="text-xs text-muted mb-1 block">As of Date</label>
           <input type="date" value={asOfDate} onChange={e => setAsOfDate(e.target.value)} className="px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
         </div>
-        <button onClick={fetchTB} disabled={reportLoading} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50 flex items-center gap-2">
-          {reportLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <BookOpen className="w-4 h-4" />} Generate
+        <button onClick={fetchTB} disabled={tbLoading} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50 flex items-center gap-2">
+          {tbLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <BookOpen className="w-4 h-4" />} Generate
         </button>
         {tbData && <button onClick={handlePrint} className="px-4 py-2 bg-surface border border-border text-sm text-foreground rounded-lg hover:bg-surface-hover flex items-center gap-2"><Printer className="w-4 h-4" /> Print</button>}
       </div>
@@ -632,13 +759,34 @@ export default function FinancialsPage() {
               </button>
             ))}
           </div>
-          <button onClick={fetchAging} disabled={reportLoading} className="px-4 py-2 bg-surface border border-border text-sm text-foreground rounded-lg hover:bg-surface-hover flex items-center gap-2">
-            {reportLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Refresh
+          <button onClick={fetchAging} disabled={agingLoading} className="px-4 py-2 bg-surface border border-border text-sm text-foreground rounded-lg hover:bg-surface-hover flex items-center gap-2">
+            {agingLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Refresh
           </button>
         </div>
 
         {data && (
           <>
+            {data.risk && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="glass-card p-3">
+                  <p className="text-xs text-muted">90+ Days Amount</p>
+                  <p className="text-lg font-bold text-red-400">{fmt(data.risk.over90Amount)}</p>
+                </div>
+                <div className="glass-card p-3">
+                  <p className="text-xs text-muted">90+ Days Share</p>
+                  <p className="text-lg font-bold text-amber-400">{fmtPct(data.risk.over90SharePct)}</p>
+                </div>
+                <div className="glass-card p-3">
+                  <p className="text-xs text-muted">Top 5 Concentration</p>
+                  <p className="text-lg font-bold text-yellow-400">{fmtPct(data.risk.top5SharePct)}</p>
+                </div>
+                <div className="glass-card p-3">
+                  <p className="text-xs text-muted">Avg Days Past Due</p>
+                  <p className="text-lg font-bold text-blue-400">{data.risk.averageDaysPastDue.toFixed(1)}d</p>
+                </div>
+              </div>
+            )}
+
             {/* Summary cards */}
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
               {data.summary?.map(b => (
@@ -667,8 +815,8 @@ export default function FinancialsPage() {
                   <table className="w-full text-sm">
                     <thead><tr className="border-b border-border bg-surface">
                       {agingTab === 'receivables'
-                        ? ['Invoice', 'Date', 'Customer', 'Phone', 'Total', 'Balance Due', 'Age (days)'].map(h => <th key={h} className="px-3 py-2 text-left text-xs font-medium text-muted">{h}</th>)
-                        : ['PO #', 'Date', 'Supplier', 'Total', 'Balance Due', 'Age (days)', 'Terms'].map(h => <th key={h} className="px-3 py-2 text-left text-xs font-medium text-muted">{h}</th>)
+                        ? ['Invoice', 'Date', 'Due Date', 'Customer', 'Phone', 'Total', 'Balance Due', 'Days Past Due'].map(h => <th key={h} className="px-3 py-2 text-left text-xs font-medium text-muted">{h}</th>)
+                        : ['PO #', 'Date', 'Expected/Due', 'Supplier', 'Total', 'Balance Due', 'Days Past Due', 'Terms'].map(h => <th key={h} className="px-3 py-2 text-left text-xs font-medium text-muted">{h}</th>)
                       }
                     </tr></thead>
                     <tbody>
@@ -677,6 +825,7 @@ export default function FinancialsPage() {
                           <tr key={i} className="border-b border-border/50 hover:bg-surface-hover">
                             <td className="px-3 py-2 font-medium text-foreground">{inv.displayId}</td>
                             <td className="px-3 py-2 text-muted">{fmtDate(inv.date)}</td>
+                            <td className="px-3 py-2 text-muted">{fmtDate(inv.dueDate || inv.date)}</td>
                             <td className="px-3 py-2 text-foreground">{inv.customer}</td>
                             <td className="px-3 py-2 text-muted">{inv.phone}</td>
                             <td className="px-3 py-2 text-foreground">{fmt(inv.total)}</td>
@@ -688,6 +837,7 @@ export default function FinancialsPage() {
                           <tr key={i} className="border-b border-border/50 hover:bg-surface-hover">
                             <td className="px-3 py-2 font-medium text-foreground">{po.displayId}</td>
                             <td className="px-3 py-2 text-muted">{fmtDate(po.date)}</td>
+                            <td className="px-3 py-2 text-muted">{fmtDate(po.expectedDate || po.date)}</td>
                             <td className="px-3 py-2 text-foreground">{po.supplier}</td>
                             <td className="px-3 py-2 text-foreground">{fmt(po.total)}</td>
                             <td className="px-3 py-2 font-semibold text-amber-400">{fmt(po.balanceDue)}</td>
@@ -853,6 +1003,7 @@ export default function FinancialsPage() {
       </div>
 
       {tab === 'overview' && renderOverview()}
+      {tab === 'executive' && renderExecutive()}
       {tab === 'pnl' && renderPnL()}
       {tab === 'bs' && renderBS()}
       {tab === 'cf' && renderCF()}

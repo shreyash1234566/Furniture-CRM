@@ -30,17 +30,13 @@ export default function ReturningCustomerCard({ profile, onApplyDiscount, loadin
   const totalPurchases = profile.invoiceCount + profile.orderCount + profile.customOrderCount;
   const isFirstVisit = totalPurchases === 0;
 
-  const daysSince = profile.lastPurchaseDate
-    ? Math.floor((Date.now() - new Date(profile.lastPurchaseDate).getTime()) / (1000 * 60 * 60 * 24))
+  const lastVisitLabel = profile.lastPurchaseDate
+    ? `Last: ${new Date(profile.lastPurchaseDate).toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    })}`
     : null;
-
-  const lastVisitLabel = daysSince === null
-    ? null
-    : daysSince === 0
-    ? 'today'
-    : daysSince === 1
-    ? 'yesterday'
-    : `${daysSince}d ago`;
 
   // Loyalty tier
   const tier = isFirstVisit

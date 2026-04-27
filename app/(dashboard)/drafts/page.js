@@ -24,7 +24,9 @@ export default function DraftsPage() {
   };
 
   useEffect(() => {
-    reload().then(() => setLoading(false));
+    // Initial draft load is intentionally kicked off on mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    reload().finally(() => setLoading(false));
   }, []);
 
   const handleRestore = async (draftId) => {

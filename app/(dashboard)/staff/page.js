@@ -12,7 +12,7 @@ import {
   ClipboardList, Warehouse, ArrowDown, ArrowUp, X,
 } from 'lucide-react';
 import Modal from '@/components/Modal';
-import { getStaff, getDailyAttendanceReport } from '@/app/actions/staff';
+import { getStaff, getDailyAttendanceReport, updateStaffTarget } from '@/app/actions/staff';
 import { getStoreCampaigns } from '@/app/actions/settings';
 
 const staffRoles = ["All", "Senior Sales Executive", "Sales Executive", "Junior Sales Executive", "Design Consultant", "Warehouse Manager"];
@@ -59,6 +59,9 @@ export default function StaffPage() {
   const [selectedStaff, setSelectedStaff] = useState(null);
   const [tab, setTab] = useState('overview');
   const [staffDetailTab, setStaffDetailTab] = useState('overview');
+  const [editingTarget, setEditingTarget] = useState(null); // { staffId, name, ...values }
+  const [targetForm, setTargetForm] = useState({ monthlyTarget: 0, achieved: 0, commissionRate: 0, commissionEarned: 0, commissionPending: 0 });
+  const [targetSubmitting, setTargetSubmitting] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
@@ -106,8 +109,36 @@ export default function StaffPage() {
     { key: 'activity', label: 'Activity Log', icon: Activity },
     { key: 'field', label: 'Field Operations', icon: MapPin },
     { key: 'inventory', label: 'Stock Updates', icon: Warehouse },
-    { key: 'marketing', label: 'Store Marketing', icon: QrCode },
   ];
+
+  const openEditTarget = (member) => {
+    setEditingTarget(member);
+    setTargetForm({
+      monthlyTarget: member.target?.monthly || 0,
+      achieved: member.target?.achieved || 0,
+      commissionRate: member.commission?.rate || 0,
+      commissionEarned: member.commission?.earned || 0,
+      commissionPending: member.commission?.pending || 0,
+    });
+  };
+
+  const handleSaveTarget = async () => {
+    if (!editingTarget) return;
+    setTargetSubmitting(true);
+    const res = await updateStaffTarget(editingTarget.id, {
+      monthlyTarget: Number(targetForm.monthlyTarget),
+      achieved: Number(targetForm.achieved),
+      commissionRate: Number(targetForm.commissionRate),
+      commissionEarned: Number(targetForm.commissionEarned),
+      commissionPending: Number(targetForm.commissionPending),
+    });
+    if (res.success) {
+      setEditingTarget(null);
+      const res2 = await getStaff();
+      if (res2.success) setStaff(res2.data);
+    } else alert(res.error);
+    setTargetSubmitting(false);
+  };
 
   if (loading) {
     return (
@@ -144,7 +175,7 @@ export default function StaffPage() {
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Staff Dashboard</h1>
-          <p className="text-sm text-muted mt-1">Performance, attendance, field ops, inventory & marketing</p>
+          <p className="text-sm text-muted mt-1">Performance, attendance, targets, field ops & stock</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
@@ -337,13 +368,16 @@ export default function StaffPage() {
 
           {/* Per-Staff Targets */}
           <div className="glass-card overflow-hidden">
-            <div className="p-4 border-b border-border">
-              <h3 className="text-base font-semibold text-foreground">Monthly Targets — March 2026</h3>
+            <div className="p-4 border-b border-border flex items-center justify-between">
+              <h3 className="text-base font-semibold text-foreground">Monthly Targets &amp; Commission</h3>
+              <p className="text-xs text-muted">Click &quot;Set Target&quot; to assign or update a staff member&apos;s target</p>
             </div>
             <div className="divide-y divide-border">
-              {staff.filter(s => s.target.monthly > 0).map(member => {
-                const pct = Math.round((member.target.achieved / member.target.monthly) * 100);
-                const remaining = member.target.monthly - member.target.achieved;
+              {staff.filter(s => s.status === 'Active').map(member => {
+                const monthly = member.target?.monthly || 0;
+                const achieved = member.target?.achieved || 0;
+                const pct = monthly > 0 ? Math.round((achieved / monthly) * 100) : 0;
+                const remaining = monthly - achieved;
                 return (
                   <div key={member.id} className="p-5">
                     <div className="flex items-center justify-between mb-3">
@@ -354,28 +388,81 @@ export default function StaffPage() {
                           <p className="text-xs text-muted">{member.role}</p>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <p className="text-sm font-bold text-foreground">₹{(member.target.achieved / 1000).toFixed(0)}K <span className="text-muted font-normal">/ ₹{(member.target.monthly / 1000).toFixed(0)}K</span></p>
-                        <p className={`text-xs font-medium ${pct >= 80 ? 'text-emerald-700' : pct >= 50 ? 'text-amber-700' : 'text-red-700'}`}>
-                          {pct >= 100 ? 'Target Achieved!' : `₹${(remaining / 1000).toFixed(0)}K remaining`}
-                        </p>
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          {monthly > 0 ? (
+                            <>
+                              <p className="text-sm font-bold text-foreground">₹{(achieved / 1000).toFixed(0)}K <span className="text-muted font-normal">/ ₹{(monthly / 1000).toFixed(0)}K</span></p>
+                              <p className={`text-xs font-medium ${pct >= 100 ? 'text-emerald-700' : pct >= 50 ? 'text-amber-700' : 'text-red-700'}`}>
+                                {pct >= 100 ? 'Target Achieved!' : `₹${(remaining / 1000).toFixed(0)}K remaining`}
+                              </p>
+                            </>
+                          ) : (
+                            <p className="text-xs text-muted">No target set</p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => openEditTarget(member)}
+                          className="px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-medium hover:bg-accent/90 flex items-center gap-1.5"
+                        >
+                          <Target className="w-3.5 h-3.5" /> Set Target
+                        </button>
                       </div>
                     </div>
-                    <div className="h-2.5 bg-surface rounded-full overflow-hidden mb-3">
-                      <div className={`h-full rounded-full transition-all ${pct >= 80 ? 'bg-emerald-600' : pct >= 50 ? 'bg-amber-600' : 'bg-red-600'}`} style={{ width: `${Math.min(100, pct)}%` }} />
-                    </div>
+                    {monthly > 0 && (
+                      <div className="h-2.5 bg-surface rounded-full overflow-hidden mb-3">
+                        <div className={`h-full rounded-full transition-all ${pct >= 80 ? 'bg-emerald-600' : pct >= 50 ? 'bg-amber-600' : 'bg-red-600'}`} style={{ width: `${Math.min(100, pct)}%` }} />
+                      </div>
+                    )}
                     <div className="flex items-center justify-between text-xs text-muted">
-                      <span>Commission Rate: {member.commission.rate}%</span>
-                      <span>Earned: <span className="font-semibold text-emerald-700">₹{member.commission.earned.toLocaleString()}</span></span>
-                      <span>Pending: <span className="font-semibold text-amber-700">₹{member.commission.pending.toLocaleString()}</span></span>
+                      <span>Commission Rate: {member.commission?.rate || 0}%</span>
+                      <span>Earned: <span className="font-semibold text-emerald-700">₹{(member.commission?.earned || 0).toLocaleString()}</span></span>
+                      <span>Pending: <span className="font-semibold text-amber-700">₹{(member.commission?.pending || 0).toLocaleString()}</span></span>
                     </div>
                   </div>
                 );
               })}
+              {staff.filter(s => s.status === 'Active').length === 0 && (
+                <div className="p-8 text-center text-muted text-sm">No active staff members found.</div>
+              )}
             </div>
           </div>
         </div>
       )}
+
+      {/* ===== TARGET EDIT MODAL ===== */}
+      <Modal isOpen={!!editingTarget} onClose={() => setEditingTarget(null)} title={`Set Target — ${editingTarget?.name}`}>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-muted mb-1.5">Monthly Target (₹)</label>
+              <input type="number" min="0" value={targetForm.monthlyTarget} onChange={e => setTargetForm(f => ({ ...f, monthlyTarget: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" placeholder="e.g. 500000" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-muted mb-1.5">Achieved So Far (₹)</label>
+              <input type="number" min="0" value={targetForm.achieved} onChange={e => setTargetForm(f => ({ ...f, achieved: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" placeholder="e.g. 250000" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1.5">Commission Rate (%)</label>
+            <input type="number" min="0" max="100" step="0.5" value={targetForm.commissionRate} onChange={e => setTargetForm(f => ({ ...f, commissionRate: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" placeholder="e.g. 2.5" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-muted mb-1.5">Commission Earned (₹)</label>
+              <input type="number" min="0" value={targetForm.commissionEarned} onChange={e => setTargetForm(f => ({ ...f, commissionEarned: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" placeholder="e.g. 12500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-muted mb-1.5">Commission Pending (₹)</label>
+              <input type="number" min="0" value={targetForm.commissionPending} onChange={e => setTargetForm(f => ({ ...f, commissionPending: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" placeholder="e.g. 5000" />
+            </div>
+          </div>
+          <p className="text-xs text-muted">These values are manually managed. Achieved amount should reflect total sales for the current month.</p>
+          <button onClick={handleSaveTarget} disabled={targetSubmitting} className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50">
+            {targetSubmitting ? 'Saving...' : 'Save Target & Commission'}
+          </button>
+        </div>
+      </Modal>
 
       {/* ===== ATTENDANCE TAB ===== */}
       {tab === 'attendance' && (

@@ -80,6 +80,7 @@ export default function TopBar() {
     if (type === 'stock_alert') return Package;
     if (type === 'field_visit') return MapPin;
     if (type === 'purchase_order') return FileText;
+    if (type === 'financial_alert') return AlertTriangle;
     return AlertTriangle;
   };
 
@@ -89,6 +90,7 @@ export default function TopBar() {
     if (type === 'stock_alert') return 'text-warning bg-warning/10';
     if (type === 'field_visit') return 'text-success bg-success/10';
     if (type === 'purchase_order') return 'text-blue-600 bg-blue-500/10';
+    if (type === 'financial_alert') return 'text-red-600 bg-red-500/10';
     return 'text-danger bg-danger/10';
   };
 
@@ -98,7 +100,7 @@ export default function TopBar() {
       if (!Number.isNaN(convoId)) {
         await markConversationNotificationRead(convoId);
       }
-    } else if (item.type === 'stock_alert' || item.type === 'field_visit' || item.type === 'purchase_order') {
+    } else if (item.type === 'stock_alert' || item.type === 'field_visit' || item.type === 'purchase_order' || item.type === 'financial_alert') {
       const notifId = Number(item.id.split('-')[1]);
       if (!Number.isNaN(notifId)) {
         await markNotificationRead(notifId);
@@ -134,21 +136,24 @@ export default function TopBar() {
   }, [showUserMenu, showNotifications]);
 
   return (
-    <header className="h-[64px] border-b border-border bg-white flex items-center justify-between px-4 md:px-6 sticky top-0 z-40">
+    <header className="h-[56px] md:h-[64px] border-b border-border bg-white/95 backdrop-blur-md flex items-center justify-between px-4 md:px-6 sticky top-0 z-40">
       {/* Left section */}
       <div className="flex items-center gap-3 flex-1 min-w-0">
         {/* Hamburger — mobile only */}
         <button
           type="button"
           onClick={() => setSidebarOpen(true)}
-          className="md:hidden p-2 -ml-1 rounded-lg hover:bg-surface-hover transition-colors flex-shrink-0 relative z-10"
-          aria-label="Open menu"
+          className="md:hidden p-2 -ml-1 rounded-xl hover:bg-surface-hover transition-colors flex-shrink-0"
+          aria-label="Open sidebar menu"
         >
           <Menu className="w-5 h-5 text-foreground" />
         </button>
 
-        {/* Search */}
-        <div className={`relative flex items-center transition-all duration-200 min-w-0 ${searchFocused ? 'md:w-[400px] w-full' : 'md:w-[300px] w-full'}`}>
+        {/* Mobile: App title / Desktop: Search */}
+        <div className="md:hidden flex items-center gap-2 min-w-0">
+          <span className="text-base font-bold text-foreground tracking-tight truncate">Furzentic</span>
+        </div>
+        <div className={`hidden md:flex relative items-center transition-all duration-200 ${searchFocused ? 'w-[400px]' : 'w-[300px]'}`}>
           <Search className="absolute left-3 w-4 h-4 text-muted pointer-events-none" />
           <input
             type="text"
@@ -179,7 +184,7 @@ export default function TopBar() {
           </button>
 
           {showNotifications && (
-            <div className="absolute right-0 top-full mt-1.5 w-[360px] max-w-[90vw] bg-white rounded-xl border border-border shadow-lg z-50 overflow-hidden animate-[fade-in_0.15s_ease-out]">
+            <div className="absolute right-0 top-full mt-1.5 w-[360px] max-w-[calc(100vw-24px)] bg-white rounded-2xl border border-border shadow-xl z-50 overflow-hidden animate-[fade-in_0.15s_ease-out]">
               <div className="px-4 py-3 border-b border-border flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold text-foreground">Notifications</p>
@@ -247,9 +252,10 @@ export default function TopBar() {
         <div className="relative" ref={menuRef}>
           <button
             onClick={() => setShowUserMenu(!showUserMenu)}
-            className="flex items-center gap-2.5 hover:bg-surface-hover rounded-lg px-2.5 py-1.5 transition-colors"
+            className="flex items-center gap-2.5 hover:bg-surface-hover rounded-xl px-2 py-1.5 min-h-[44px] md:min-h-0 transition-colors"
+            aria-label="User menu"
           >
-            <div className="w-7 h-7 rounded-full bg-stone-700 flex items-center justify-center text-white text-xs font-semibold">
+            <div className="w-8 h-8 rounded-full bg-stone-700 flex items-center justify-center text-white text-xs font-semibold ring-2 ring-transparent hover:ring-accent/20 transition-all">
               {userInitials}
             </div>
             <div className="text-left hidden md:block">

@@ -5,6 +5,17 @@ import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/auth-helpers'
 import { createJournalSchema, createAccountSchema } from '@/lib/validations/financials'
 
+const prismaDynamic = prisma as unknown as {
+  purchasePayment?: {
+    aggregate: (...args: unknown[]) => Promise<{ _sum: { amount: number | null }, _count?: { id: number } }>
+  }
+}
+
+async function aggregatePurchasePayments(where: Record<string, unknown>) {
+  if (!prismaDynamic.purchasePayment) return { _sum: { amount: 0 }, _count: { id: 0 } }
+  return prismaDynamic.purchasePayment.aggregate({ where, _sum: { amount: true }, _count: { id: true } })
+}
+
 // ─── CHART OF ACCOUNTS ────────────────────────────────
 
 const DEFAULT_ACCOUNTS = [
@@ -50,8 +61,39 @@ const DEFAULT_ACCOUNTS = [
   { groupName: 'Operating Expenses', type: 'EXPENSE', code: '5900', name: 'Other Expenses' },
 ]
 
+function parseAsOfDate(asOfDate: string) {
+  const asOf = new Date(asOfDate)
+  if (Number.isNaN(asOf.getTime())) return null
+  asOf.setHours(23, 59, 59, 999)
+  return asOf
+}
+
+function parseDateRange(fromDate: string, toDate: string) {
+  const from = new Date(fromDate)
+  const to = new Date(toDate)
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return null
+  if (from > to) return null
+  to.setHours(23, 59, 59, 999)
+  return { from, to }
+}
+
+function calcAgingRisk(totalOutstanding: number, over90Amount: number, topItems: Array<{ balanceDue: number }>, weightedDays: number) {
+  const top5 = topItems
+    .slice()
+    .sort((a, b) => b.balanceDue - a.balanceDue)
+    .slice(0, 5)
+    .reduce((s, i) => s + i.balanceDue, 0)
+
+  return {
+    over90Amount,
+    over90SharePct: totalOutstanding > 0 ? (over90Amount / totalOutstanding) * 100 : 0,
+    top5SharePct: totalOutstanding > 0 ? (top5 / totalOutstanding) * 100 : 0,
+    averageDaysPastDue: totalOutstanding > 0 ? weightedDays / totalOutstanding : 0,
+  }
+}
+
 export async function seedChartOfAccounts() {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
+  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
   const existing = await prisma.ledgerAccount.count()
   if (existing > 0) return { success: true, message: 'Chart of accounts already exists' }
 
@@ -98,15 +140,19 @@ export async function createAccount(data: unknown) {
 export async function getProfitAndLoss(fromDate: string, toDate: string, compareFrom?: string, compareTo?: string) {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
 
+  if (!parseDateRange(fromDate, toDate)) {
+    return { success: false, error: 'Invalid date range' }
+  }
+
   async function fetchPL(fd: string, td: string) {
-    const from = new Date(fd)
-    const to = new Date(td)
-    to.setHours(23, 59, 59, 999)
+    const range = parseDateRange(fd, td)
+    if (!range) return null
+    const { from, to } = range
 
     const [invoiceAgg, creditNoteAgg, invoiceItems, purchaseAgg, payrollAgg, employerPayroll] = await Promise.all([
       // Gross sales from invoices
       prisma.invoice.aggregate({
-        where: { date: { gte: from, lte: to }, invoiceStatus: 'ACTIVE' },
+        where: { date: { gte: from, lte: to }, invoiceStatus: 'ACTIVE', heldAt: null },
         _sum: { subtotal: true, discount: true, gst: true, total: true },
         _count: { id: true },
       }),
@@ -118,7 +164,7 @@ export async function getProfitAndLoss(fromDate: string, toDate: string, compare
       }),
       // CORRECT COGS: cost of items actually sold
       prisma.invoiceItem.findMany({
-        where: { invoice: { date: { gte: from, lte: to }, invoiceStatus: 'ACTIVE' } },
+        where: { invoice: { date: { gte: from, lte: to }, invoiceStatus: 'ACTIVE', heldAt: null } },
         include: { product: { select: { costPrice: true } } },
       }),
       // Purchases in period (for reference, not used for COGS)
@@ -182,9 +228,11 @@ export async function getProfitAndLoss(fromDate: string, toDate: string, compare
   }
 
   const current = await fetchPL(fromDate, toDate)
+  if (!current) return { success: false, error: 'Invalid date range' }
   let compare = null
   if (compareFrom && compareTo) {
     compare = await fetchPL(compareFrom, compareTo)
+    if (!compare) return { success: false, error: 'Invalid comparison date range' }
   }
 
   return { success: true, data: { current, compare } }
@@ -195,40 +243,47 @@ export async function getProfitAndLoss(fromDate: string, toDate: string, compare
 export async function getBalanceSheet(asOfDate: string) {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
 
-  const asOf = new Date(asOfDate)
-  asOf.setHours(23, 59, 59, 999)
+  const asOf = parseAsOfDate(asOfDate)
+  if (!asOf) return { success: false, error: 'Invalid as-of date' }
 
   const [
     payments, supplierPaid, receivables, poPayables,
     products, gstOutputInvoices, gstInputPOs,
-    payrollPayable, staffLoans,
+    payrollPayable, staffLoans, salaryPaid,
+    creditRefunds, loanRecoveries,
   ] = await Promise.all([
     // Cash collected from customers
-    prisma.payment.aggregate({ where: { date: { lte: asOf } }, _sum: { amount: true } }),
+    prisma.payment.aggregate({ where: { date: { lte: asOf }, invoice: { heldAt: null, invoiceStatus: 'ACTIVE' } }, _sum: { amount: true } }),
     // Cash paid to suppliers (amountPaid on POs)
-    prisma.purchaseOrder.aggregate({ where: { date: { lte: asOf }, status: { notIn: ['CANCELLED', 'DRAFT'] } }, _sum: { amountPaid: true } }),
+    aggregatePurchasePayments({ paidAt: { lte: asOf } }),
     // Accounts receivable (outstanding invoices)
-    prisma.invoice.aggregate({ where: { invoiceStatus: 'ACTIVE', date: { lte: asOf } }, _sum: { balanceDue: true } }),
+    prisma.invoice.aggregate({ where: { invoiceStatus: 'ACTIVE', heldAt: null, date: { lte: asOf } }, _sum: { balanceDue: true } }),
     // Accounts payable (outstanding POs)
     prisma.purchaseOrder.aggregate({ where: { date: { lte: asOf }, status: { notIn: ['CANCELLED'] } }, _sum: { balanceDue: true } }),
     // Inventory at cost price
     prisma.product.findMany({ select: { stock: true, costPrice: true } }),
     // GST output (from invoices)
-    prisma.invoice.aggregate({ where: { date: { lte: asOf }, invoiceStatus: 'ACTIVE' }, _sum: { gst: true } }),
+    prisma.invoice.aggregate({ where: { date: { lte: asOf }, invoiceStatus: 'ACTIVE', heldAt: null }, _sum: { gst: true } }),
     // GST input (ITC from purchases)
     prisma.purchaseOrder.aggregate({ where: { date: { lte: asOf }, status: { in: ['RECEIVED', 'PARTIALLY_RECEIVED'] }, itcEligible: true }, _sum: { gst: true } }),
     // Salary payable (approved but unpaid payroll)
     prisma.payrollRun.aggregate({ where: { status: 'APPROVED' }, _sum: { totalNet: true } }),
     // Staff loans outstanding (assets — money owed by staff)
     prisma.staffLoan.aggregate({ where: { status: 'Active' }, _sum: { remainingAmount: true } }),
+    prisma.payrollRun.aggregate({ where: { status: 'PAID', paidAt: { lte: asOf } }, _sum: { totalNet: true } }),
+    prisma.creditNote.aggregate({ where: { date: { lte: asOf } }, _sum: { amount: true } }),
+    prisma.payslip.aggregate({ where: { payrollRun: { status: 'PAID', paidAt: { lte: asOf } } }, _sum: { loanDeduction: true } }),
   ])
 
   const cashCollected = payments._sum.amount || 0
-  const cashPaidToSuppliers = supplierPaid._sum.amountPaid || 0
-  const cashAndBank = cashCollected - cashPaidToSuppliers
+  const cashPaidToSuppliers = supplierPaid._sum.amount || 0
+  const salaryPaidOut = salaryPaid._sum.totalNet || 0
+  const refundsPaid = creditRefunds._sum.amount || 0
+  const loanInflow = loanRecoveries._sum.loanDeduction || 0
+  const cashAndBank = cashCollected + loanInflow - cashPaidToSuppliers - salaryPaidOut - refundsPaid
 
   const accountsReceivable = receivables._sum.balanceDue || 0
-  const inventoryValue = products.reduce((sum, p) => sum + p.stock * (p.costPrice || 0), 0)
+  const inventoryValue = products.reduce((sum: number, p: { stock: number, costPrice: number | null }) => sum + p.stock * (p.costPrice || 0), 0)
   const staffLoanAsset = staffLoans._sum.remainingAmount || 0
   const itcAsset = gstInputPOs._sum.gst || 0
 
@@ -271,6 +326,9 @@ export async function getBalanceSheet(asOfDate: string) {
         derived: equity,
         note: 'Equity = Total Assets − Total Liabilities',
       },
+      quality: {
+        cashModel: 'Cash = customer collections + payroll loan recoveries - supplier payouts - salary payouts - refunds',
+      },
     },
   }
 }
@@ -280,18 +338,15 @@ export async function getBalanceSheet(asOfDate: string) {
 export async function getCashFlow(fromDate: string, toDate: string) {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
 
-  const from = new Date(fromDate)
-  const to = new Date(toDate)
-  to.setHours(23, 59, 59, 999)
+  const range = parseDateRange(fromDate, toDate)
+  if (!range) return { success: false, error: 'Invalid date range' }
+  const { from, to } = range
 
-  const [salesCollections, purchasePayments, salaryPayments, creditNoteRefunds, loanCollections] = await Promise.all([
+  const [salesCollections, supplierPayments, salaryPayments, creditNoteRefunds, loanCollections] = await Promise.all([
     // Inflow: cash collected from customers
-    prisma.payment.aggregate({ where: { date: { gte: from, lte: to } }, _sum: { amount: true } }),
-    // Outflow: cash paid to suppliers
-    prisma.purchaseOrder.aggregate({
-      where: { receivedAt: { gte: from, lte: to } },
-      _sum: { amountPaid: true },
-    }),
+    prisma.payment.aggregate({ where: { date: { gte: from, lte: to }, invoice: { heldAt: null, invoiceStatus: 'ACTIVE' } }, _sum: { amount: true } }),
+    // Outflow: actual supplier payments (event-based)
+    aggregatePurchasePayments({ paidAt: { gte: from, lte: to } }),
     // Outflow: salaries paid
     prisma.payrollRun.aggregate({
       where: { status: 'PAID', paidAt: { gte: from, lte: to } },
@@ -307,7 +362,7 @@ export async function getCashFlow(fromDate: string, toDate: string) {
   ])
 
   const salesInflow = salesCollections._sum.amount || 0
-  const purchaseOutflow = purchasePayments._sum.amountPaid || 0
+  const purchaseOutflow = supplierPayments._sum.amount || 0
   const salaryOutflow = salaryPayments._sum.totalNet || 0
   const refundOutflow = creditNoteRefunds._sum.amount || 0
   const loanInflow = loanCollections._sum.loanDeduction || 0
@@ -336,7 +391,113 @@ export async function getCashFlow(fromDate: string, toDate: string) {
       },
       investing: { net: 0, note: 'Fixed asset purchases not tracked yet' },
       financing: { net: 0, note: 'Equity/loan transactions not tracked yet' },
+      quality: {
+        purchasePayments: {
+          eventBasedAmount: purchaseOutflow,
+          paymentRows: Number((supplierPayments as { _count?: { id?: number } })._count?.id || 0),
+          note: 'Supplier payouts are sourced from PurchasePayment entries (event-based)',
+        },
+      },
       netCashFlow: netOperating,
+    },
+  }
+}
+
+export async function getExecutiveSummary(fromDate: string, toDate: string) {
+  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+
+  const range = parseDateRange(fromDate, toDate)
+  if (!range) return { success: false, error: 'Invalid date range' }
+  const { from, to } = range
+
+  const periodDays = Math.max(1, Math.ceil((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)) + 1)
+  const prevTo = new Date(from)
+  prevTo.setDate(prevTo.getDate() - 1)
+  prevTo.setHours(23, 59, 59, 999)
+  const prevFrom = new Date(prevTo)
+  prevFrom.setDate(prevFrom.getDate() - (periodDays - 1))
+  prevFrom.setHours(0, 0, 0, 0)
+
+  const [bsRes, currPLRes, prevPLRes, recAgingRes, payAgingRes, supplierOutflow, currOpex] = await Promise.all([
+    getBalanceSheet(toDate),
+    getProfitAndLoss(fromDate, toDate),
+    getProfitAndLoss(prevFrom.toISOString().slice(0, 10), prevTo.toISOString().slice(0, 10)),
+    getReceivablesAging(),
+    getPayablesAging(),
+    aggregatePurchasePayments({ paidAt: { gte: from, lte: to } }),
+    prisma.payrollRun.aggregate({ where: { status: 'PAID', paidAt: { gte: from, lte: to } }, _sum: { totalNet: true } }),
+  ])
+
+  if (!bsRes.success || !currPLRes.success || !prevPLRes.success || !recAgingRes.success || !payAgingRes.success) {
+    return { success: false, error: 'Unable to compute executive summary' }
+  }
+
+  if (!bsRes.data || !currPLRes.data || !prevPLRes.data || !recAgingRes.data || !payAgingRes.data) {
+    return { success: false, error: 'Executive summary data is incomplete' }
+  }
+
+  const bsData = bsRes.data
+  const currPLData = currPLRes.data
+  const prevPLData = prevPLRes.data
+  const recAgingData = recAgingRes.data
+  const payAgingData = payAgingRes.data
+
+  const currentPL = currPLData.current
+  const previousPL = prevPLData.current
+  const currentAssets = bsData.currentAssets?.total || 0
+  const currentLiabilities = bsData.currentLiabilities?.total || 0
+  const currentRatio = currentLiabilities > 0 ? currentAssets / currentLiabilities : null
+
+  const receivables = bsData.currentAssets?.accountsReceivable || 0
+  const payables = bsData.currentLiabilities?.accountsPayable || 0
+  const dailyRevenue = (currentPL.revenue?.netRevenue || 0) / periodDays
+  const dailyPurchases = Math.max(1, (supplierOutflow._sum.amount || 0) / periodDays)
+  const dso = dailyRevenue > 0 ? receivables / dailyRevenue : null
+  const dpo = payables > 0 ? payables / dailyPurchases : null
+
+  const dailyOperatingBurn = ((supplierOutflow._sum.amount || 0) + (currOpex._sum.totalNet || 0)) / periodDays
+  const cashRunwayDays = dailyOperatingBurn > 0 ? (bsData.currentAssets?.cashAndBank || 0) / dailyOperatingBurn : null
+
+  const netProfitDelta = (currentPL.netProfit || 0) - (previousPL.netProfit || 0)
+  const netMarginDeltaPct = (currentPL.netMarginPct || 0) - (previousPL.netMarginPct || 0)
+  const grossMarginDeltaPct = (currentPL.grossMarginPct || 0) - (previousPL.grossMarginPct || 0)
+
+  const alerts = [
+    recAgingData.risk?.over90SharePct > 35 ? 'High receivables concentration in 90+ bucket' : null,
+    payAgingData.risk?.over90SharePct > 35 ? 'High payables concentration in 90+ bucket' : null,
+    netMarginDeltaPct < -5 ? 'Net margin dropped more than 5 percentage points vs prior period' : null,
+    currentRatio !== null && currentRatio < 1 ? 'Current ratio below 1.0 (working capital stress)' : null,
+  ].filter(Boolean)
+
+  return {
+    success: true,
+    data: {
+      period: { from: fromDate, to: toDate, days: periodDays },
+      liquidity: {
+        currentAssets,
+        currentLiabilities,
+        currentRatio,
+        cashAndBank: bsData.currentAssets?.cashAndBank || 0,
+        cashRunwayDays,
+      },
+      cycle: {
+        dso,
+        dpo,
+      },
+      performance: {
+        netProfit: currentPL.netProfit || 0,
+        netProfitDelta,
+        netMarginPct: currentPL.netMarginPct || 0,
+        netMarginDeltaPct,
+        grossMarginPct: currentPL.grossMarginPct || 0,
+        grossMarginDeltaPct,
+      },
+      agingRisk: {
+        receivables: recAgingData.risk,
+        payables: payAgingData.risk,
+      },
+      alerts,
+      benchmarkNote: 'Aligned with CRM executive-summary practices: liquidity, cycle metrics, margin variance, and aging concentration',
     },
   }
 }
@@ -346,26 +507,32 @@ export async function getCashFlow(fromDate: string, toDate: string) {
 export async function getTrialBalance(asOfDate: string) {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
 
-  const asOf = new Date(asOfDate)
-  asOf.setHours(23, 59, 59, 999)
+  const asOf = parseAsOfDate(asOfDate)
+  if (!asOf) return { success: false, error: 'Invalid as-of date' }
 
   const [payments, receivables, inventory, poPayables, salesTotal, purchasesTotal,
-    payrollTotal, employerTotal, gstOutput, gstInput, creditNotes, staffLoans] = await Promise.all([
-    prisma.payment.aggregate({ where: { date: { lte: asOf } }, _sum: { amount: true } }),
-    prisma.invoice.aggregate({ where: { invoiceStatus: 'ACTIVE', date: { lte: asOf } }, _sum: { balanceDue: true } }),
+    payrollTotal, employerTotal, gstOutput, gstInput, creditNotes, staffLoans, salaryPaid, loanRecoveries] = await Promise.all([
+    prisma.payment.aggregate({ where: { date: { lte: asOf }, invoice: { heldAt: null, invoiceStatus: 'ACTIVE' } }, _sum: { amount: true } }),
+    prisma.invoice.aggregate({ where: { invoiceStatus: 'ACTIVE', heldAt: null, date: { lte: asOf } }, _sum: { balanceDue: true } }),
     prisma.product.findMany({ select: { stock: true, costPrice: true } }),
     prisma.purchaseOrder.aggregate({ where: { date: { lte: asOf }, status: { notIn: ['CANCELLED'] } }, _sum: { balanceDue: true } }),
-    prisma.invoice.aggregate({ where: { invoiceStatus: 'ACTIVE', date: { lte: asOf } }, _sum: { subtotal: true, discount: true } }),
+    prisma.invoice.aggregate({ where: { invoiceStatus: 'ACTIVE', heldAt: null, date: { lte: asOf } }, _sum: { subtotal: true, discount: true } }),
     prisma.purchaseOrder.aggregate({ where: { date: { lte: asOf }, status: { in: ['RECEIVED', 'PARTIALLY_RECEIVED'] } }, _sum: { subtotal: true, discount: true } }),
     prisma.payrollRun.aggregate({ where: { status: { in: ['APPROVED', 'PAID'] } }, _sum: { totalGross: true } }),
     prisma.payrollRun.aggregate({ where: { status: { in: ['APPROVED', 'PAID'] } }, _sum: { employerContributions: true } }),
-    prisma.invoice.aggregate({ where: { invoiceStatus: 'ACTIVE', date: { lte: asOf } }, _sum: { gst: true } }),
+    prisma.invoice.aggregate({ where: { invoiceStatus: 'ACTIVE', heldAt: null, date: { lte: asOf } }, _sum: { gst: true } }),
     prisma.purchaseOrder.aggregate({ where: { date: { lte: asOf }, status: { in: ['RECEIVED', 'PARTIALLY_RECEIVED'] }, itcEligible: true }, _sum: { gst: true } }),
     prisma.creditNote.aggregate({ where: { date: { lte: asOf } }, _sum: { amount: true } }),
     prisma.staffLoan.aggregate({ where: { status: 'Active' }, _sum: { remainingAmount: true } }),
+    prisma.payrollRun.aggregate({ where: { status: 'PAID', paidAt: { lte: asOf } }, _sum: { totalNet: true } }),
+    prisma.payslip.aggregate({ where: { payrollRun: { status: 'PAID', paidAt: { lte: asOf } } }, _sum: { loanDeduction: true } }),
   ])
 
-  const cashAndBank = (payments._sum.amount || 0)
+  const supplierPayout = (await aggregatePurchasePayments({ paidAt: { lte: asOf } }))._sum.amount || 0
+  const salaryPaidOut = salaryPaid._sum.totalNet || 0
+  const loanInflow = loanRecoveries._sum.loanDeduction || 0
+  const refundsPaid = creditNotes._sum.amount || 0
+  const cashAndBank = (payments._sum.amount || 0) + loanInflow - supplierPayout - salaryPaidOut - refundsPaid
   const receivablesVal = receivables._sum.balanceDue || 0
   const inventoryVal = inventory.reduce((s, p) => s + p.stock * (p.costPrice || 0), 0)
   const gstITC = gstInput._sum.gst || 0
@@ -425,7 +592,7 @@ export async function getReceivablesAging() {
   today.setHours(0, 0, 0, 0)
 
   const outstanding = await prisma.invoice.findMany({
-    where: { invoiceStatus: 'ACTIVE', balanceDue: { gt: 0 } },
+    where: { invoiceStatus: 'ACTIVE', heldAt: null, balanceDue: { gt: 0 } },
     include: { contact: { select: { name: true, phone: true } } },
     orderBy: { date: 'asc' },
   })
@@ -433,13 +600,21 @@ export async function getReceivablesAging() {
   const buckets = { current: [] as typeof outstanding, days30: [], days60: [], days90: [], over90: [] } as Record<string, typeof outstanding>
   const labels: Record<string, string> = { current: '0-30 days', days30: '31-60 days', days60: '61-90 days', days90: '91-180 days', over90: '180+ days' }
 
+  let weightedDays = 0
+  let over90Amount = 0
   for (const inv of outstanding) {
-    const ageDays = Math.floor((today.getTime() - new Date(inv.date).getTime()) / (1000 * 60 * 60 * 24))
+    const dueRef = inv.dueDate || inv.date
+    const ageDays = Math.max(0, Math.floor((today.getTime() - new Date(dueRef).getTime()) / (1000 * 60 * 60 * 24)))
+    weightedDays += ageDays * inv.balanceDue
     if (ageDays <= 30) buckets.current.push(inv)
     else if (ageDays <= 60) buckets.days30.push(inv)
     else if (ageDays <= 90) buckets.days60.push(inv)
-    else if (ageDays <= 180) buckets.days90.push(inv)
+    else if (ageDays <= 180) {
+      buckets.days90.push(inv)
+      over90Amount += inv.balanceDue
+    }
     else buckets.over90.push(inv)
+    if (ageDays > 180) over90Amount += inv.balanceDue
   }
 
   const summary = Object.entries(buckets).map(([key, items]) => ({
@@ -450,12 +625,14 @@ export async function getReceivablesAging() {
     invoices: items.map(i => ({
       displayId: i.displayId, date: i.date, customer: i.contact.name,
       phone: i.contact.phone, total: i.total, balanceDue: i.balanceDue,
-      ageDays: Math.floor((today.getTime() - new Date(i.date).getTime()) / (1000 * 60 * 60 * 24)),
+        ageDays: Math.max(0, Math.floor((today.getTime() - new Date(i.dueDate || i.date).getTime()) / (1000 * 60 * 60 * 24))),
+        dueDate: i.dueDate,
     })),
   }))
 
   const totalOutstanding = outstanding.reduce((s, i) => s + i.balanceDue, 0)
-  return { success: true, data: { summary, totalOutstanding, totalCount: outstanding.length } }
+  const risk = calcAgingRisk(totalOutstanding, over90Amount, outstanding, weightedDays)
+  return { success: true, data: { summary, totalOutstanding, totalCount: outstanding.length, risk } }
 }
 
 // ─── PAYABLES AGING ──────────────────────────────────
@@ -475,14 +652,23 @@ export async function getPayablesAging() {
   const buckets = { current: [] as typeof outstanding, days30: [], days60: [], days90: [], over90: [] } as Record<string, typeof outstanding>
   const labels: Record<string, string> = { current: '0-30 days', days30: '31-60 days', days60: '61-90 days', days90: '91-180 days', over90: '180+ days' }
 
+  let weightedDays = 0
+  let over90Amount = 0
   for (const po of outstanding) {
-    const ageDays = Math.floor((today.getTime() - new Date(po.date).getTime()) / (1000 * 60 * 60 * 24))
-    const dueDays = po.supplier.paymentTerms || 30
-    if (ageDays <= dueDays) buckets.current.push(po)
+    const baseDate = po.expectedDate || po.date
+    const dueDate = new Date(baseDate)
+    if (!po.expectedDate) dueDate.setDate(dueDate.getDate() + (po.supplier.paymentTerms || 30))
+    const ageDays = Math.max(0, Math.floor((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24)))
+    weightedDays += ageDays * po.balanceDue
+    if (ageDays <= 30) buckets.current.push(po)
     else if (ageDays <= 60) buckets.days30.push(po)
     else if (ageDays <= 90) buckets.days60.push(po)
-    else if (ageDays <= 180) buckets.days90.push(po)
+    else if (ageDays <= 180) {
+      buckets.days90.push(po)
+      over90Amount += po.balanceDue
+    }
     else buckets.over90.push(po)
+    if (ageDays > 180) over90Amount += po.balanceDue
   }
 
   const summary = Object.entries(buckets).map(([key, items]) => ({
@@ -493,24 +679,32 @@ export async function getPayablesAging() {
     pos: items.map(p => ({
       displayId: p.displayId, date: p.date, supplier: p.supplier.name,
       total: p.total, balanceDue: p.balanceDue,
-      ageDays: Math.floor((today.getTime() - new Date(p.date).getTime()) / (1000 * 60 * 60 * 24)),
+        ageDays: (() => {
+          const baseDate = p.expectedDate || p.date
+          const dueDate = new Date(baseDate)
+          if (!p.expectedDate) dueDate.setDate(dueDate.getDate() + (p.supplier.paymentTerms || 30))
+          return Math.max(0, Math.floor((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24)))
+        })(),
       paymentTerms: p.supplier.paymentTerms,
+        expectedDate: p.expectedDate,
     })),
   }))
 
   const totalOutstanding = outstanding.reduce((s, p) => s + p.balanceDue, 0)
-  return { success: true, data: { summary, totalOutstanding, totalCount: outstanding.length } }
+  const risk = calcAgingRisk(totalOutstanding, over90Amount, outstanding, weightedDays)
+  return { success: true, data: { summary, totalOutstanding, totalCount: outstanding.length, risk } }
 }
 
 // ─── JOURNAL ENTRIES ─────────────────────────────────
 
 export async function getJournalEntries(fromDate?: string, toDate?: string) {
+  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+
   const where: Record<string, unknown> = {}
   if (fromDate && toDate) {
-    const from = new Date(fromDate)
-    const to = new Date(toDate)
-    to.setHours(23, 59, 59, 999)
-    where.date = { gte: from, lte: to }
+    const range = parseDateRange(fromDate, toDate)
+    if (!range) return { success: false, error: 'Invalid date range' }
+    where.date = { gte: range.from, lte: range.to }
   }
 
   const entries = await prisma.journalEntry.findMany({
@@ -533,6 +727,20 @@ export async function createManualJournal(data: unknown) {
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
   const { date, narration, lines } = parsed.data
+  const journalDate = new Date(date)
+  if (Number.isNaN(journalDate.getTime())) return { success: false, error: 'Invalid journal date' }
+
+  const hasBothSidesInSingleLine = lines.some(l => l.debit > 0 && l.credit > 0)
+  if (hasBothSidesInSingleLine) {
+    return { success: false, error: 'A journal line cannot have both debit and credit values' }
+  }
+
+  const debitLines = lines.filter(l => l.debit > 0).length
+  const creditLines = lines.filter(l => l.credit > 0).length
+  if (debitLines === 0 || creditLines === 0) {
+    return { success: false, error: 'Journal must include at least one debit line and one credit line' }
+  }
+
   const totalDebit = lines.reduce((s, l) => s + l.debit, 0)
   const totalCredit = lines.reduce((s, l) => s + l.credit, 0)
   if (Math.abs(totalDebit - totalCredit) > 1) {
@@ -544,7 +752,7 @@ export async function createManualJournal(data: unknown) {
 
   const entry = await prisma.journalEntry.create({
     data: {
-      displayId, date: new Date(date), narration,
+      displayId, date: journalDate, narration,
       referenceType: 'MANUAL', totalDebit, totalCredit,
       lines: {
         create: lines.map(l => ({

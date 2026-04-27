@@ -52,6 +52,8 @@ const createBlankItem = () => ({
   imageSource: 'REFERENCE',
 })
 
+const BANK_DETAILS_KEY = 'quotation_bank_details'
+
 const createBlankBankDetails = () => ({
   accountName: '',
   bankName: '',
@@ -60,6 +62,20 @@ const createBlankBankDetails = () => ({
   branchName: '',
   upiId: '',
 })
+
+function loadSavedBankDetails() {
+  try {
+    const saved = localStorage.getItem(BANK_DETAILS_KEY)
+    if (saved) return { ...createBlankBankDetails(), ...JSON.parse(saved) }
+  } catch {}
+  return createBlankBankDetails()
+}
+
+function saveBankDetailsToStorage(details) {
+  try {
+    localStorage.setItem(BANK_DETAILS_KEY, JSON.stringify(details))
+  } catch {}
+}
 
 const createInitialForm = () => ({
   customer: '',
@@ -76,7 +92,7 @@ const createInitialForm = () => ({
   freightCharge: 0,
   loadingCharge: 0,
   gstPercent: 18,
-  bankDetails: createBlankBankDetails(),
+  bankDetails: createBlankBankDetails(), // will be replaced with saved on open
   notes: '',
   termsText: defaultTerms.join('\n'),
   items: [createBlankItem()],
@@ -613,7 +629,7 @@ export default function QuotationsPage() {
 
   const openNewQuotationModal = () => {
     setEditingQuotationId(null)
-    setForm(createInitialForm())
+    setForm({ ...createInitialForm(), bankDetails: loadSavedBankDetails() })
     setShowGenerator(true)
   }
 
@@ -766,6 +782,15 @@ export default function QuotationsPage() {
       : await createQuotation(payload)
 
     if (result.success) {
+      // Persist bank details so they auto-fill next time
+      saveBankDetailsToStorage({
+        accountName: (form.bankDetails?.accountName || '').trim(),
+        bankName: (form.bankDetails?.bankName || '').trim(),
+        accountNumber: (form.bankDetails?.accountNumber || '').trim(),
+        ifscCode: (form.bankDetails?.ifscCode || '').trim(),
+        branchName: (form.bankDetails?.branchName || '').trim(),
+        upiId: (form.bankDetails?.upiId || '').trim(),
+      })
       setForm(createInitialForm())
       setEditingQuotationId(null)
       setShowGenerator(false)

@@ -524,11 +524,23 @@ export async function receivePurchaseOrder(id: number) {
   return { success: true }
 }
 
-export async function recordPurchaseOrderPayment(id: number, amount: number, note?: string) {
+export async function recordPurchaseOrderPayment(
+  id: number,
+  amount: number,
+  note?: string,
+  method: string = 'Bank Transfer',
+  reference?: string,
+  paidAt?: string
+) {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
 
   if (!Number.isFinite(amount) || amount <= 0) {
     return { success: false, error: 'Payment amount must be greater than 0' }
+  }
+
+  const paymentDate = paidAt ? new Date(paidAt) : new Date()
+  if (Number.isNaN(paymentDate.getTime())) {
+    return { success: false, error: 'Invalid payment date' }
   }
 
   const po = await prisma.purchaseOrder.findUnique({ where: { id } })
@@ -537,15 +549,28 @@ export async function recordPurchaseOrderPayment(id: number, amount: number, not
   if (po.balanceDue <= 0) return { success: false, error: 'This PO is already fully paid' }
   if (amount > po.balanceDue) return { success: false, error: 'Payment cannot exceed pending balance' }
 
-  const paymentLine = `[PAYMENT ${new Date().toISOString().slice(0, 10)}] Rs. ${amount.toLocaleString('en-IN')}${note?.trim() ? ` - ${note.trim()}` : ''}`
+  const paymentLine = `[PAYMENT ${paymentDate.toISOString().slice(0, 10)}] Rs. ${amount.toLocaleString('en-IN')} via ${method}${reference?.trim() ? ` (${reference.trim()})` : ''}${note?.trim() ? ` - ${note.trim()}` : ''}`
 
-  const updated = await prisma.purchaseOrder.update({
-    where: { id },
-    data: {
-      amountPaid: { increment: amount },
-      balanceDue: { decrement: amount },
-      notes: po.notes ? `${po.notes}\n${paymentLine}` : paymentLine,
-    },
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.purchasePayment.create({
+      data: {
+        poId: id,
+        amount,
+        method,
+        reference,
+        notes: note,
+        paidAt: paymentDate,
+      },
+    })
+
+    return tx.purchaseOrder.update({
+      where: { id },
+      data: {
+        amountPaid: { increment: amount },
+        balanceDue: { decrement: amount },
+        notes: po.notes ? `${po.notes}\n${paymentLine}` : paymentLine,
+      },
+    })
   })
 
   revalidatePath('/purchases')

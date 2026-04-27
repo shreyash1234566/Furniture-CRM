@@ -34,6 +34,7 @@ export default function WalkinsPage() {
   const [showQrModal, setShowQrModal] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState('');
   const [qrUrl, setQrUrl] = useState('');
+  const [linkCopied, setLinkCopied] = useState(false);
 
   useEffect(() => {
     Promise.all([getWalkins(), getStaff()]).then(([walkinsRes, staffRes]) => {
@@ -59,10 +60,11 @@ export default function WalkinsPage() {
 
   const generateQr = async (customUrl) => {
     // Use custom URL or detect local network IP for mobile scanning
-    let baseUrl = customUrl || window.location.origin;
+    const validCustom = typeof customUrl === 'string' && customUrl.startsWith('http') ? customUrl : null;
+    let baseUrl = validCustom || window.location.origin;
 
     // If running on localhost, try to get local network IP
-    if (!customUrl && (baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1'))) {
+    if (!validCustom && (baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1'))) {
       try {
         const port = window.location.port || '3000';
         // Use WebRTC to detect local IP
@@ -179,7 +181,7 @@ export default function WalkinsPage() {
           <p className="text-sm text-muted mt-1">Reception desk — Log & track every visitor</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={generateQr} className="flex items-center gap-2 px-4 py-2.5 border border-border text-foreground hover:bg-surface-hover rounded-xl text-sm font-medium transition-all">
+          <button onClick={() => generateQr()} className="flex items-center gap-2 px-4 py-2.5 border border-border text-foreground hover:bg-surface-hover rounded-xl text-sm font-medium transition-all">
             <QrCode className="w-4 h-4" /> QR Code
           </button>
           <button onClick={() => setShowRegisterModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
@@ -424,32 +426,75 @@ export default function WalkinsPage() {
       </Modal>
 
       {/* QR Code Modal */}
-      <Modal isOpen={showQrModal} onClose={() => setShowQrModal(false)} title="Walk-in QR Code" size="sm">
-        <div className="text-center space-y-4">
-          <p className="text-sm text-muted">Display this QR code at your showroom entrance. Customers scan it to register their visit.</p>
+      <Modal isOpen={showQrModal} onClose={() => setShowQrModal(false)} title="Walk-in Registration" size="lg">
+        <div className="space-y-5">
+          {/* Description */}
+          <p className="text-sm text-muted">
+            Customers scan this QR code or visit the link below to register their walk-in visit at your showroom. Their details will appear in this dashboard in real-time.
+          </p>
 
-          {qrDataUrl && (
-            <div className="flex justify-center">
-              <div className="p-4 bg-white rounded-2xl border-2 border-dashed border-border inline-block">
-                <img src={qrDataUrl} alt="Walk-in QR Code" className="w-56 h-56" />
+          {/* QR + Link side by side (desktop) or stacked (mobile) */}
+          <div className="flex flex-col md:flex-row gap-5 items-center">
+            {/* QR Code */}
+            {qrDataUrl && (
+              <div className="flex-shrink-0 p-5 bg-white rounded-2xl border-2 border-dashed border-border">
+                <img src={qrDataUrl} alt="Walk-in QR Code" className="w-52 h-52 md:w-44 md:h-44" />
+              </div>
+            )}
+
+            {/* Link + Actions */}
+            <div className="flex-1 space-y-4 w-full">
+              <div>
+                <label className="block text-[10px] uppercase tracking-wider text-muted font-semibold mb-1.5">Shareable Link</label>
+                <div className="flex gap-2">
+                  <div className="flex-1 px-3 py-2.5 bg-surface border border-border rounded-xl text-xs text-foreground break-all select-all">
+                    {qrUrl || '/walkin-form'}
+                  </div>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(qrUrl || `${window.location.origin}/walkin-form`);
+                      setLinkCopied(true);
+                      setTimeout(() => setLinkCopied(false), 2500);
+                    }}
+                    className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${
+                      linkCopied
+                        ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
+                        : 'bg-accent text-white hover:bg-accent-hover'
+                    }`}
+                  >
+                    {linkCopied ? <><CheckCircle2 className="w-3.5 h-3.5" /> Copied!</> : 'Copy Link'}
+                  </button>
+                </div>
+                <p className="text-[11px] text-muted mt-1.5">Share this link via WhatsApp, SMS, or display it on a tablet at your entrance.</p>
+              </div>
+
+              <div className="flex gap-2">
+                <button onClick={downloadQr} className="flex-1 flex items-center justify-center gap-2 py-2.5 border border-border rounded-xl text-sm font-medium text-foreground hover:bg-surface-hover transition-colors">
+                  <Download className="w-4 h-4" /> Download
+                </button>
+                <button onClick={printQr} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
+                  <Printer className="w-4 h-4" /> Print
+                </button>
               </div>
             </div>
-          )}
-
-          <div className="p-3 rounded-xl bg-surface text-xs text-muted break-all">
-            {qrUrl || '/walkin-form'}
           </div>
 
-          {/* Local network hint */}
-          {qrUrl && qrUrl.includes('localhost') && (
-            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-left space-y-2">
-              <p className="font-medium text-amber-700">QR points to localhost — mobile can&apos;t reach it.</p>
-              <p className="text-amber-600">Enter your PC&apos;s local IP below (both devices must be on same WiFi):</p>
+          {/* Localhost Warning + IP Entry */}
+          {qrUrl && (qrUrl.includes('localhost') || qrUrl.includes('127.0.0.1')) && (
+            <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-3">
+              <div className="flex items-start gap-2">
+                <div className="p-1 rounded-lg bg-amber-500/20 mt-0.5"><QrCode className="w-3.5 h-3.5 text-amber-700" /></div>
+                <div>
+                  <p className="text-xs font-semibold text-amber-700">QR points to localhost — phones can&apos;t reach it</p>
+                  <p className="text-[11px] text-amber-600 mt-0.5">Enter your computer&apos;s local IP address (both devices must be on same WiFi network).</p>
+                </div>
+              </div>
               <div className="flex gap-2">
                 <input
                   type="text"
                   placeholder="e.g. 192.168.1.5"
-                  className="flex-1 px-3 py-2 bg-white border border-amber-300 rounded-lg text-sm text-gray-800 focus:outline-none focus:border-amber-500"
+                  id="ip-input"
+                  className="flex-1 px-3 py-2.5 bg-white border border-amber-300 rounded-xl text-sm text-gray-800 focus:outline-none focus:border-amber-500 placeholder:text-amber-300"
                   onKeyDown={async (e) => {
                     if (e.key === 'Enter' && e.target.value.trim()) {
                       const port = window.location.port || '3000';
@@ -458,32 +503,35 @@ export default function WalkinsPage() {
                   }}
                 />
                 <button
-                  onClick={async (e) => {
-                    const input = e.target.closest('div').querySelector('input');
+                  onClick={async () => {
+                    const input = document.getElementById('ip-input');
                     if (input?.value.trim()) {
                       const port = window.location.port || '3000';
                       await generateQr(`http://${input.value.trim()}:${port}`);
                     }
                   }}
-                  className="px-3 py-2 bg-amber-500 text-white rounded-lg text-xs font-medium hover:bg-amber-600"
+                  className="px-4 py-2.5 bg-amber-500 text-white rounded-xl text-xs font-semibold hover:bg-amber-600 transition-colors"
                 >
                   Update QR
                 </button>
               </div>
-              <p className="text-amber-600">Find your IP: open CMD → type <code className="bg-amber-200/50 px-1 rounded">ipconfig</code> → look for <strong>IPv4 Address</strong></p>
+              <div className="flex items-center gap-2 text-[11px] text-amber-600">
+                <span>Find your IP:</span>
+                <code className="px-1.5 py-0.5 bg-amber-200/50 rounded text-amber-700 font-medium">Win+R → cmd → ipconfig</code>
+                <span>→ look for</span>
+                <strong>IPv4 Address</strong>
+              </div>
             </div>
           )}
 
-          <div className="flex items-center gap-3 pt-2">
-            <button onClick={downloadQr} className="flex-1 flex items-center justify-center gap-2 py-2.5 border border-border rounded-xl text-sm font-medium text-foreground hover:bg-surface-hover transition-colors">
-              <Download className="w-4 h-4" /> Download
-            </button>
-            <button onClick={printQr} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
-              <Printer className="w-4 h-4" /> Print
-            </button>
+          {/* Tips */}
+          <div className="flex items-start gap-3 p-3.5 rounded-xl bg-surface border border-border">
+            <div className="p-1.5 rounded-lg bg-accent-light flex-shrink-0"><Eye className="w-3.5 h-3.5 text-accent" /></div>
+            <div className="text-xs text-muted space-y-1">
+              <p><strong className="text-foreground">Best placement:</strong> Print and display near the entrance, reception desk, or on table standees.</p>
+              <p>You can also open the link on a tablet and place it at reception for customers to fill in directly.</p>
+            </div>
           </div>
-
-          <p className="text-[11px] text-muted">Tip: Print and place near the entrance, reception desk, or on table standees.</p>
         </div>
       </Modal>
     </div>

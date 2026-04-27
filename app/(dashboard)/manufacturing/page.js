@@ -207,7 +207,11 @@ export default function ManufacturingPage() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { loadData() }, [loadData])
+  useEffect(() => {
+    // Initial manufacturing dashboard bootstrap fetch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadData()
+  }, [loadData])
 
   // Auto-refresh production data every 30s so admin sees staff progress updates
   useEffect(() => {
@@ -1233,7 +1237,7 @@ export default function ManufacturingPage() {
                   value={rmForm.reorderLevel}
                   onChange={e => setRmForm(f => ({ ...f, reorderLevel: e.target.value }))}
                   className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
-                <p className="text-[9px] text-muted mt-0.5">You'll get a "Low Stock" warning when stock falls to this level</p>
+                <p className="text-[9px] text-muted mt-0.5">You&apos;ll get a &quot;Low Stock&quot; warning when stock falls to this level</p>
               </div>
               <div>
                 <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Description</label>
@@ -1561,6 +1565,56 @@ export default function ManufacturingPage() {
               ))}
             </div>
           </div>
+
+          {/* ── Live Manufacturing Cost Summary ── */}
+          {bomForm.items.some(i => i.rawMaterialId) && (() => {
+            const allProducts = products
+            const matCost = bomForm.items.reduce((sum, item) => {
+              if (!item.rawMaterialId) return sum
+              const prod = allProducts.find(p => String(p.id) === String(item.rawMaterialId))
+              const uc = Number(item.unitCost) > 0 ? Number(item.unitCost) : (prod?.costPrice ?? prod?.price ?? 0)
+              const qty = Number(item.quantity) * (1 + (Number(item.wastagePercent) || 0) / 100)
+              return sum + uc * qty
+            }, 0)
+            const stepCost = bomForm.steps.reduce((sum, s) => {
+              return sum + ((Number(s.durationMins) / 60) * Number(s.labourRatePerHour || 0)) + Number(s.machineCostPerUnit || 0)
+            }, 0)
+            const totalMfg = matCost + stepCost
+            const selProd = products.find(p => String(p.id) === String(bomForm.finishedProductId))
+            const sellingPrice = selProd?.price ?? 0
+            const margin = sellingPrice > 0 ? sellingPrice - totalMfg : null
+            return (
+              <div className="p-3 rounded-xl bg-surface-hover border border-border">
+                <p className="text-[10px] text-muted uppercase tracking-wide font-semibold mb-2">Manufacturing Cost Estimate</p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div className="p-2 rounded-lg bg-surface text-center">
+                    <p className="text-[10px] text-muted mb-0.5">Material Cost</p>
+                    <p className="text-sm font-bold text-blue-400">₹{matCost.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
+                  </div>
+                  <div className="p-2 rounded-lg bg-surface text-center">
+                    <p className="text-[10px] text-muted mb-0.5">Labour + Machine</p>
+                    <p className="text-sm font-bold text-orange-400">₹{stepCost.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
+                  </div>
+                  <div className="p-2 rounded-lg bg-accent/10 text-center">
+                    <p className="text-[10px] text-muted mb-0.5">Total Mfg Cost</p>
+                    <p className="text-sm font-bold text-accent">₹{totalMfg.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
+                  </div>
+                  <div className={`p-2 rounded-lg text-center ${margin === null ? 'bg-surface' : margin >= 0 ? 'bg-emerald-500/10' : 'bg-red-500/10'}`}>
+                    <p className="text-[10px] text-muted mb-0.5">{sellingPrice > 0 ? 'Est. Margin' : 'Selling Price'}</p>
+                    {sellingPrice > 0 ? (
+                      <p className={`text-sm font-bold ${margin >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        ₹{(margin ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                        <span className="text-[10px] ml-1">({((margin / sellingPrice) * 100).toFixed(1)}%)</span>
+                      </p>
+                    ) : (
+                      <p className="text-sm text-muted">—</p>
+                    )}
+                  </div>
+                </div>
+                {sellingPrice > 0 && <p className="text-[10px] text-muted mt-1.5">Selling Price: ₹{sellingPrice.toLocaleString('en-IN')} &nbsp;|&nbsp; Material: ₹{matCost.toFixed(0)} + Steps: ₹{stepCost.toFixed(0)}</p>}
+              </div>
+            )
+          })()}
 
           {/* Routing Steps with Job Costing */}
           <div>
@@ -2006,8 +2060,38 @@ function BOMCard({ bom, products, workCenters, onToggle, onDelete, onExport, onS
           <p className="text-xs text-muted mt-1">
             Finished Product: <span className="text-foreground">{bom.finishedProduct?.name}</span>
             {bom.finishedProduct?.sku && <span className="ml-1">({bom.finishedProduct.sku})</span>}
-            {bom.finishedProduct?.price && <span className="ml-2 text-emerald-400">₹{bom.finishedProduct.price.toLocaleString('en-IN')}</span>}
           </p>
+          {/* Cost summary row */}
+          {(() => {
+            const matCost = bom.items?.reduce((sum, item) => {
+              const uc = item.unitCost > 0 ? item.unitCost : (item.rawMaterial?.costPrice ?? 0)
+              const qty = item.quantity * (1 + (item.wastagePercent || 0) / 100)
+              return sum + uc * qty
+            }, 0) ?? 0
+            const stepCost = bom.steps?.reduce((sum, s) => {
+              return sum + ((Number(s.durationMins) / 60) * Number(s.labourRatePerHour || 0)) + Number(s.machineCostPerUnit || 0)
+            }, 0) ?? 0
+            const totalMfg = matCost + stepCost
+            const sellingPrice = bom.finishedProduct?.price ?? 0
+            const margin = sellingPrice > 0 ? sellingPrice - totalMfg : null
+            return (
+              <div className="flex items-center gap-3 mt-2 flex-wrap">
+                <span className="text-[11px] px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-400 font-medium">
+                  Mfg Cost: ₹{totalMfg.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                </span>
+                {sellingPrice > 0 && (
+                  <span className="text-[11px] px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 font-medium">
+                    Selling: ₹{sellingPrice.toLocaleString('en-IN')}
+                  </span>
+                )}
+                {margin !== null && (
+                  <span className={`text-[11px] px-2 py-0.5 rounded-md font-medium ${margin >= 0 ? 'bg-purple-500/10 text-purple-400' : 'bg-red-500/10 text-red-400'}`}>
+                    Margin: ₹{margin.toLocaleString('en-IN', { maximumFractionDigits: 0 })} {sellingPrice > 0 ? `(${((margin / sellingPrice) * 100).toFixed(1)}%)` : ''}
+                  </span>
+                )}
+              </div>
+            )
+          })()}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <button onClick={onExport} className="p-1.5 rounded hover:bg-surface-hover text-muted hover:text-emerald-400" title="Export BOM as CSV"><Download className="w-4 h-4" /></button>
