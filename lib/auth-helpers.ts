@@ -1,5 +1,6 @@
 import { auth } from './auth'
-import type { UserRole } from '@prisma/client'
+
+type UserRole = 'ADMIN' | 'MANAGER' | 'STAFF'
 
 export async function getSession() {
   const session = await auth()

@@ -3,7 +3,8 @@ import Credentials from 'next-auth/providers/credentials'
 import { PrismaAdapter } from '@auth/prisma-adapter'
 import { prisma } from './db'
 import bcrypt from 'bcryptjs'
-import type { UserRole } from '@prisma/client'
+
+type UserRole = 'ADMIN' | 'MANAGER' | 'STAFF'
 
 declare module 'next-auth' {
   interface Session {

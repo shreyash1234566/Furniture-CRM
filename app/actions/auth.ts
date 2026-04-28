@@ -3,8 +3,10 @@
 import { prisma } from '@/lib/db'
 import bcrypt from 'bcryptjs'
 import { z } from 'zod'
-import type { UserRole } from '@prisma/client'
+import type { Prisma } from '@prisma/client'
 import { requireRole } from '@/lib/auth-helpers'
+
+type UserRole = Prisma.UserRole
 
 const createUserSchema = z.object({
   email: z.string().email(),

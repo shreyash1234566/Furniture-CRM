@@ -5,7 +5,9 @@ import { revalidatePath } from 'next/cache'
 import { createStaffSchema, updateStaffSchema } from '@/lib/validations/staff'
 import { requireAuth, requireRole } from '@/lib/auth-helpers'
 import bcrypt from 'bcryptjs'
-import type { UserRole } from '@prisma/client'
+import type { Prisma } from '@prisma/client'
+
+type UserRole = Prisma.UserRole
 
 export async function getStaff() {
   const staff = await prisma.staff.findMany({
