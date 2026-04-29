@@ -54,8 +54,9 @@ function LoginContent() {
       if (!res.ok) {
         setError(result.error || 'Invalid email or password');
       } else {
-        router.push(callbackUrl);
-        router.refresh();
+        // Full page reload so AuthProvider re-mounts and fetches the fresh session
+        // (router.push + refresh doesn't unmount client components, leaving the role stale)
+        window.location.href = callbackUrl;
       }
     } catch {
       setError('Something went wrong. Please try again.');
@@ -88,8 +89,8 @@ function LoginContent() {
       if (!res.ok) {
         setError(result.error || 'Invalid PIN. Use last 4 digits of your phone number.');
       } else {
-        router.push('/staff-portal');
-        router.refresh();
+        // Full page reload so AuthProvider re-mounts and fetches the fresh session
+        window.location.href = '/staff-portal';
       }
     } catch {
       setError('Something went wrong. Please try again.');
