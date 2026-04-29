@@ -13,7 +13,16 @@ const nextConfig = {
     serverActions: {
       allowedOrigins: ['localhost:3000', '*.github.dev']
     }
-  }
+  },
+  // Rewrite /uploads/* → /api/uploads/* so images stored with old paths still work
+  async rewrites() {
+    return [
+      {
+        source: '/uploads/:path*',
+        destination: '/api/uploads/:path*',
+      },
+    ];
+  },
 };
 
 export default nextConfig;

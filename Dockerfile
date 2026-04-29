@@ -40,7 +40,7 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 
 # Ensure uploads directory exists and is writable (for local file upload fallback)
-RUN mkdir -p ./public/uploads && chown -R nextjs:nodejs ./public/uploads
+RUN mkdir -p ./uploads && chown -R nextjs:nodejs ./uploads
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
 # Copy Prisma files for migrations/seed

@@ -43,17 +43,18 @@ async function uploadFileLocal(
 ): Promise<string> {
   const ext = fileName.split('.').pop() || 'bin'
   const uniqueName = `${randomUUID()}.${ext}`
-  const dir = join(process.cwd(), 'public', 'uploads', folder)
+  // Store in ./uploads/ (not public/) — served via /api/uploads/[...path] route
+  const dir = join(process.cwd(), 'uploads', folder)
   await mkdir(dir, { recursive: true })
   const filePath = join(dir, uniqueName)
   await writeFile(filePath, file)
-  // Return a URL path relative to public/
-  return `/uploads/${folder}/${uniqueName}`
+  return `/api/uploads/${folder}/${uniqueName}`
 }
 
 async function deleteFileLocal(key: string): Promise<void> {
-  // key looks like "/uploads/products/uuid.jpg"
-  const filePath = join(process.cwd(), 'public', key)
+  // key looks like "/api/uploads/products/uuid.jpg"
+  const relativePath = key.replace(/^\/api\/uploads\//, '')
+  const filePath = join(process.cwd(), 'uploads', relativePath)
   try {
     await unlink(filePath)
   } catch {

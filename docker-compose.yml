@@ -52,7 +52,7 @@ services:
       migrate:
         condition: service_completed_successfully
     volumes:
-      - uploads:/app/public/uploads
+      - uploads:/app/uploads
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/auth/me"]
       interval: 30s
