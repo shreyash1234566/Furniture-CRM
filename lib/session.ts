@@ -1,5 +1,4 @@
 import { cookies } from 'next/headers'
-import { createHmac, timingSafeEqual } from 'crypto'
 
 const SESSION_SECRET = process.env.SESSION_SECRET || 'default-secret-at-least-32-chars-long'
 const COOKIE_NAME = 'session'
@@ -13,14 +12,62 @@ export interface SessionPayload {
   expiresAt: Date
 }
 
-function sign(payload: string, secret: string) {
-  return createHmac('sha256', secret).update(payload).digest('base64url')
+// Edge-compatible base64url encode/decode
+function b64urlEncode(str: string) {
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(str).toString('base64url');
+  }
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+function b64urlDecode(str: string) {
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(str, 'base64url').toString('utf8');
+  }
+  const b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+  return atob(b64);
+}
+
+// Edge-compatible HMAC signing using Web Crypto API
+async function sign(payload: string, secret: string) {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  
+  const signature = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    encoder.encode(payload)
+  );
+
+  // Convert ArrayBuffer to base64url
+  const uint8View = new Uint8Array(signature);
+  const base64 = typeof Buffer !== 'undefined' 
+    ? Buffer.from(uint8View).toString('base64url')
+    : btoa(String.fromCharCode(...uint8View)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    
+  return base64;
 }
 
 export async function encrypt(payload: SessionPayload) {
-  const data = Buffer.from(JSON.stringify(payload)).toString('base64url')
-  const signature = sign(data, SESSION_SECRET)
+  const data = b64urlEncode(JSON.stringify(payload))
+  const signature = await sign(data, SESSION_SECRET)
   return `${data}.${signature}`
+}
+
+// Edge compatible constant-time comparison
+function timingSafeEqualEdge(a: string, b: string) {
+  if (a.length !== b.length) return false;
+  let result = 0;
+  for (let i = 0; i < a.length; i++) {
+    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return result === 0;
 }
 
 export async function decrypt(session: string | undefined): Promise<SessionPayload | null> {
@@ -29,19 +76,14 @@ export async function decrypt(session: string | undefined): Promise<SessionPaylo
   const [data, signature] = session.split('.')
   if (!data || !signature) return null
 
-  const expectedSignature = sign(data, SESSION_SECRET)
-  const signatureBuffer = Buffer.from(signature, 'base64url')
-  const expectedSignatureBuffer = Buffer.from(expectedSignature, 'base64url')
+  const expectedSignature = await sign(data, SESSION_SECRET)
 
-  if (
-    signatureBuffer.length !== expectedSignatureBuffer.length ||
-    !timingSafeEqual(signatureBuffer, expectedSignatureBuffer)
-  ) {
+  if (!timingSafeEqualEdge(signature, expectedSignature)) {
     return null
   }
 
   try {
-    const payload = JSON.parse(Buffer.from(data, 'base64url').toString()) as SessionPayload
+    const payload = JSON.parse(b64urlDecode(data)) as SessionPayload
     if (new Date(payload.expiresAt) < new Date()) {
       return null
     }

@@ -9,6 +9,11 @@ const nextConfig = {
   turbopack: {
     root: projectRoot,
   },
+  experimental: {
+    serverActions: {
+      allowedOrigins: ['localhost:3000', '*.github.dev']
+    }
+  }
 };
 
 export default nextConfig;
